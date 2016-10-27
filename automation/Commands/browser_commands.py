@@ -233,3 +233,187 @@ def save_screenshot(screenshot_name, webdriver, browser_params, manager_params):
 def dump_page_source(dump_name, webdriver, browser_params, manager_params):
     with open(os.path.join(manager_params['source_dump_path'], dump_name + '.html'), 'wb') as f:
         f.write(webdriver.page_source.encode('utf8') + '\n')
+
+#============================================================================================================
+
+def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, browser_params,
+                     manager_params, extension_socket):
+    """Finds a newsletter form on the page. If not found, visits <num_links>
+    internal links and scans those pages for a form. Submits the form if found.
+    """
+    # get the site
+    get_website(url, 0, visit_id, webdriver, proxy_queue, browser_params, extension_socket)
+
+    # connect to logger
+    logger = loggingclient(*manager_params['logger_address'])
+
+    # try to find newsletter form on landing page
+    newsletter_form = _find_newsletter_form(webdriver)
+    if newsletter_form is not None:
+        logger.info('form: %s', newsletter_form.get_attribute('outerHTML'))
+        email = _get_email_from_api(api, webdriver, logger)
+        _form_fill_and_submit(newsletter_form, email, webdriver)
+        logger.info('submitted form on: %s', webdriver.current_url)
+        return
+
+    # otherwise, scan more pages
+    main_handle = webdriver.current_window_handle
+    visited_links = set()
+    for i in xrange(num_links):
+        # get all links on the page
+        #links = get_intra_links(webdriver, url)
+        #links = filter(lambda x: x.is_displayed() == True, links)
+        links = webdriver.find_elements_by_tag_name('a')
+
+        # find a link to click
+        next_link = None
+        for link in links:
+            # check if link is valid and not already visited
+            href = link.get_attribute('href')
+            if href is None:
+                continue
+            href = href.lower()
+            if href in visited_links:
+                continue
+
+            # should we click this link?
+            link_text = link.text.lower()
+            if ('weekly ad' in link_text or 'newsletter' in link_text or
+                'subscribe' in link_text or 'inbox' in link_text or
+                'signup' in link_text or 'sign up' in link_text):
+                next_link = link
+                visited_links.add(href)
+                break
+
+        # no more links to click
+        if next_link is None:
+            break
+
+        # click the link
+        try:
+            # load the page
+            logger.info("clicking on link '%s' - %s" %
+                        (next_link.text.lower(), next_link.get_attribute('href')))
+            next_link.click()
+            wait_until_loaded(webdriver, 5000)
+            if browser_params['bot_mitigation']:
+                bot_mitigation(webdriver)
+
+            # find newsletter form
+            newsletter_form = _find_newsletter_form(webdriver)
+            if newsletter_form is not None:
+                email = _get_email_from_api(api, webdriver, logger)
+                _form_fill_and_submit(newsletter_form, email, webdriver)
+                logger.info('submitted form on: %s', webdriver.current_url)
+                return
+
+            # go back
+            webdriver.back()
+            wait_until_loaded(webdriver, 5000)
+
+            # close other windows (popups or "tabs")
+            windows = webdriver.window_handles
+            if len(windows) > 1:
+                for window in windows:
+                    if window != main_handle:
+                        webdriver.switch_to_window(window)
+                        webdriver.close()
+                webdriver.switch_to_window(main_handle)
+        except Exception:
+            pass
+
+from urllib import urlencode
+from urllib2 import Request, urlopen, URLError
+def _get_email_from_api(api, webdriver, logger):
+    """Registers an email address with the mail API, and returns the email."""
+    data = urlencode({'site': webdriver.title, 'url': webdriver.current_url})
+    req = Request(api, data)
+    response = urlopen(req)
+    email = response.read()
+    logger.info("got new email: %s" % email)
+    return email
+
+def _find_newsletter_form(webdriver):
+    """Tries to find a form element on the page for newsletter sign-up.
+    Returns None if no form was found.
+    """
+    forms = webdriver.find_elements_by_tag_name('form')
+    for form in forms:
+        if not form.is_displayed():
+            continue
+
+        # find words 'email' or 'newsletter' in the form
+        form_html = form.get_attribute('outerHTML').lower()
+        if 'email' in form_html or 'newsletter' in form_html:
+            # check if an input field contains an email element
+            input_fields = form.find_elements_by_tag_name('input')
+            for input_field in input_fields:
+                type = input_field.get_attribute('type').lower()
+                if type == 'email':
+                    return form
+                elif type == 'text':
+                    if (_element_contains_text(input_field, 'email') or
+                        _element_contains_text(input_field, 'e-mail') or
+                        _element_contains_text(input_field, 'subscribe') or
+                        _element_contains_text(input_field, 'newsletter')):
+                        return form
+    return None
+
+def _form_fill_and_submit(form, email, webdriver):
+    """Fills out a form and submits it, then waits for the response."""
+    # TODO: http://www.guru99.com/accessing-forms-in-webdriver.html
+
+    # try to fill all input fields in the form...
+    input_fields = webdriver.find_elements_by_tag_name('input')
+    for input_field in input_fields:
+        if not input_field.is_displayed():
+            continue
+
+        type = input_field.get_attribute('type').lower()
+        if type == 'email':
+            # using html5 "email" type, this is probably an email field
+            input_field.send_keys(email)
+        elif type == 'text':
+            # try to decipher this based on field attributes
+            if (_element_contains_text(input_field, 'email') or
+                _element_contains_text(input_field, 'e-mail') or
+                _element_contains_text(input_field, 'subscribe') or
+                _element_contains_text(input_field, 'newsletter')):
+                input_field.send_keys(email)
+            elif _element_contains_text(input_field, 'name'):
+                if _element_contains_text(input_field, 'first'):
+                    input_field.send_keys('Bob')
+                elif _element_contains_text(input_field, 'last'):
+                    input_field.send_keys('Smith')
+                else:
+                    input_field.send_keys('Bob Smith')
+            # TODO ... (address, phone, zip, DOB, gender)
+            else:
+                # default: assume email
+                input_field.send_keys(email)
+        elif type == 'checkbox' or type == 'radio':
+            # check anything/everything
+            if not input_field.is_selected():
+                input_field.click()
+        elif type == 'submit' or type == 'button' or type == 'reset' or type == 'hidden':
+            # common irrelevant input types
+            pass
+        else:
+            # default: assume email (TODO ?)
+            input_field.send_keys(email)
+    time.sleep(3)  # TODO delete me
+    form.submit()
+    wait_until_loaded(webdriver, 5000)
+    time.sleep(3)  # TODO delete me
+    # TODO check if we got redirected
+
+def _element_contains_text(element, text):
+    """Scans various element attributes for the given text."""
+    attributes = ['name', 'class', 'id', 'placeholder', 'value']
+    for attr in attributes:
+        e = element.get_attribute(attr)
+        if e is not None and text in e.lower():
+            return True
+    return False
+
+#============================================================================================================

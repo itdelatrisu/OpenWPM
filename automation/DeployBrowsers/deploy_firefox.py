@@ -118,6 +118,14 @@ def deploy_firefox(status_queue, browser_params, manager_params, crash_recovery)
     if browser_params['disable_flash']:
         fp.set_preference('plugin.state.flash', 0)
 
+    # Disable images
+    if browser_params['disable_images']:
+        quickjava_loc = os.path.join(root_dir, 'firefox_extensions/quickjava-2.1.2-fx.xpi')
+        fp.add_extension(extension=quickjava_loc)
+        fp.set_preference("thatoneguydotnet.QuickJava.curVersion", "2.1.2")
+        fp.set_preference("thatoneguydotnet.QuickJava.startupStatus.Images", 2)
+        fp.set_preference("thatoneguydotnet.QuickJava.startupStatus.AnimatedImage", 2)
+
     # Configure privacy settings
     configure_firefox.privacy(browser_params, fp, root_dir, browser_profile_path)
 
