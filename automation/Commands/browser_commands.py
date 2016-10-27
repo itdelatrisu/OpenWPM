@@ -319,6 +319,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
                         webdriver.switch_to_window(window)
                         webdriver.close()
                 webdriver.switch_to_window(main_handle)
+                time.sleep(1)
         except Exception:
             pass
 
@@ -365,6 +366,7 @@ def _form_fill_and_submit(form, email, webdriver):
 
     # try to fill all input fields in the form...
     input_fields = webdriver.find_elements_by_tag_name('input')
+    submit_button = None
     for input_field in input_fields:
         if not input_field.is_displayed():
             continue
@@ -385,9 +387,18 @@ def _form_fill_and_submit(form, email, webdriver):
                     input_field.send_keys('Bob')
                 elif _element_contains_text(input_field, 'last'):
                     input_field.send_keys('Smith')
+                elif _element_contains_text(input_field, 'company'):
+                    input_field.send_keys('Smith & Co.')
                 else:
                     input_field.send_keys('Bob Smith')
-            # TODO ... (address, phone, zip, DOB, gender)
+            elif _element_contains_text(input_field, 'phone'):
+                input_field.send_keys('5555555555')
+            elif (_element_contains_text(input_field, 'zip') or
+                  _element_contains_text(input_field, 'postal')):
+                input_field.send_keys('12345')
+            # TODO ... (address, DOB, gender)
+            elif _element_contains_text(input_field, 'search'):
+                pass
             else:
                 # default: assume email
                 input_field.send_keys(email)
@@ -395,16 +406,30 @@ def _form_fill_and_submit(form, email, webdriver):
             # check anything/everything
             if not input_field.is_selected():
                 input_field.click()
-        elif type == 'submit' or type == 'button' or type == 'reset' or type == 'hidden':
+        elif type == 'tel':
+            input_field.send_keys('5555555555')
+        elif type == 'submit' or type == 'button' or type == 'image':
+            if (_element_contains_text(input_field, 'submit') or
+                _element_contains_text(input_field, 'sign up')):
+                submit_button = input_field
+        elif type == 'reset' or type == 'hidden' or type == 'search':
             # common irrelevant input types
             pass
         else:
             # default: assume email (TODO ?)
             input_field.send_keys(email)
-    time.sleep(3)  # TODO delete me
-    form.submit()
+
+    # submit the form
+    time.sleep(0.5)  # TODO delete me
+    if submit_button is not None:
+        try:
+            submit_button.click()  # trigger javascript events if possible
+        except Exception:
+            form.submit()  # fall back (e.g. if obscured by modal)
+    else:
+        form.submit()
     wait_until_loaded(webdriver, 5000)
-    time.sleep(3)  # TODO delete me
+    time.sleep(4)  # TODO delete me
     # TODO check if we got redirected
 
 def _element_contains_text(element, text):
