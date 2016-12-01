@@ -1,10 +1,11 @@
 from automation import TaskManager, CommandSequence
 
-# sites to crawl
-# TODO: read from data/
+# Constants
 NUM_BROWSERS = 1
-sites = ['http://www.sweetwater.com/', 'https://www.ae.com/', 'http://www.officedepot.com/', 'http://www.gap.com/', 'https://www.jcrew.com/', 'http://www.gamestop.com/', 'http://www.cvs.com/', 'http://www.homedepot.com/', 'http://www.walmart.com']
+output_dir = '~/Desktop/'
 api = 'http://lorveskel.me:8080/register'
+site_list = 'data/shopping-500.csv' #shopping-500.csv, news-500.csv, top-1m.csv
+start_site_index = 1
 
 # Loads the manager preference and 3 copies of the default browser dictionaries
 manager_params, browser_params = TaskManager.load_default_params(NUM_BROWSERS)
@@ -17,18 +18,31 @@ for i in xrange(NUM_BROWSERS):
     browser_params[i]['disable_images'] = True
 
 # Update TaskManager configuration (use this for crawl-wide settings)
-manager_params['data_directory'] = '~/Desktop/'
-manager_params['log_directory'] = '~/Desktop/'
+manager_params['data_directory'] = output_dir
+manager_params['log_directory'] = output_dir
 
 # Instantiates the measurement platform
 # Commands time out by default after 60 seconds
 manager = TaskManager.TaskManager(manager_params, browser_params)
 
 # Visits the sites with all browsers simultaneously
-for site in sites:
+def crawl_site(site, manager, api):
     command_sequence = CommandSequence.CommandSequence(site)
-    command_sequence.find_newsletters(api=api, num_links=4, timeout=120)
+    command_sequence.find_newsletters(api=api, num_links=4, timeout=90)
     manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
+
+# Read site list
+index = 0
+with open(site_list) as f:
+    for line in f:
+        index += 1
+        if index < start_site_index:
+            continue
+        tokens = line.strip().split(',')
+        if len(tokens) < 2:
+            break
+        site = 'http://' + tokens[1]
+        crawl_site(site, manager, api)
 
 # Shuts down the browsers and waits for the data to finish logging
 manager.close()
