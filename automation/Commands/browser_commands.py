@@ -1,5 +1,5 @@
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import MoveTargetOutOfBoundsException
 from selenium.common.exceptions import TimeoutException
@@ -250,10 +250,10 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
     # try to find newsletter form on landing page
     newsletter_form = _find_newsletter_form(webdriver)
     if newsletter_form is not None:
-        logger.info('form: %s', newsletter_form.get_attribute('outerHTML'))
+        #logger.info('form: %s', newsletter_form.get_attribute('outerHTML'))
         email = _get_email_from_api(api, webdriver, logger)
         _form_fill_and_submit(newsletter_form, email, webdriver)
-        logger.info('submitted form on: %s', webdriver.current_url)
+        logger.info('submitted form on [%s] with email [%s]', webdriver.current_url, email)
         return
 
     # otherwise, scan more pages
@@ -304,7 +304,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
             if newsletter_form is not None:
                 email = _get_email_from_api(api, webdriver, logger)
                 _form_fill_and_submit(newsletter_form, email, webdriver)
-                logger.info('submitted form on: %s', webdriver.current_url)
+                logger.info('submitted form on [%s] with email [%s]', webdriver.current_url, email)
                 return
 
             # go back
@@ -327,12 +327,13 @@ from urllib import urlencode
 from urllib2 import Request, urlopen, URLError
 def _get_email_from_api(api, webdriver, logger):
     """Registers an email address with the mail API, and returns the email."""
-    data = urlencode({'site': webdriver.title, 'url': webdriver.current_url})
+    data = urlencode({
+        'site': webdriver.title.encode('ascii', 'replace'),
+        'url': webdriver.current_url,
+    })
     req = Request(api, data)
     response = urlopen(req)
-    email = response.read()
-    logger.info("got new email: %s" % email)
-    return email
+    return response.read()
 
 def _find_newsletter_form(webdriver):
     """Tries to find a form element on the page for newsletter sign-up.
@@ -362,11 +363,12 @@ def _find_newsletter_form(webdriver):
 
 def _form_fill_and_submit(form, email, webdriver):
     """Fills out a form and submits it, then waits for the response."""
-    # TODO: http://www.guru99.com/accessing-forms-in-webdriver.html
-
     # try to fill all input fields in the form...
-    input_fields = webdriver.find_elements_by_tag_name('input')
+    input_fields = form.find_elements_by_tag_name('input')
     submit_button = None
+    text_field = None
+    fake_user = 'bobsmith ' + random.randrange(0,1000)
+    fake_tel = '212' + '555' + '01' + random.randrange(0,10) + random.randrange(0,10)
     for input_field in input_fields:
         if not input_field.is_displayed():
             continue
@@ -375,6 +377,7 @@ def _form_fill_and_submit(form, email, webdriver):
         if type == 'email':
             # using html5 "email" type, this is probably an email field
             input_field.send_keys(email)
+            text_field = input_field
         elif type == 'text':
             # try to decipher this based on field attributes
             if (_element_contains_text(input_field, 'email') or
@@ -383,7 +386,9 @@ def _form_fill_and_submit(form, email, webdriver):
                 _element_contains_text(input_field, 'newsletter')):
                 input_field.send_keys(email)
             elif _element_contains_text(input_field, 'name'):
-                if _element_contains_text(input_field, 'first'):
+                if _element_contains_text(input_field, 'user'):
+                    input_field.send_keys(fake_user)
+                elif _element_contains_text(input_field, 'first'):
                     input_field.send_keys('Bob')
                 elif _element_contains_text(input_field, 'last'):
                     input_field.send_keys('Smith')
@@ -391,23 +396,28 @@ def _form_fill_and_submit(form, email, webdriver):
                     input_field.send_keys('Smith & Co.')
                 else:
                     input_field.send_keys('Bob Smith')
-            elif _element_contains_text(input_field, 'phone'):
-                input_field.send_keys('5555555555')
+            elif (_element_contains_text(input_field, 'phone') or
+                  _element_contains_text(input_field, 'tel') or
+                  _element_contains_text(input_field, 'mobile')):
+                input_field.send_keys(fake_tel)
             elif (_element_contains_text(input_field, 'zip') or
                   _element_contains_text(input_field, 'postal')):
                 input_field.send_keys('12345')
-            # TODO ... (address, DOB, gender)
+            # TODO address/city/etc.
             elif _element_contains_text(input_field, 'search'):
                 pass
             else:
                 # default: assume email
                 input_field.send_keys(email)
+            text_field = input_field
         elif type == 'checkbox' or type == 'radio':
             # check anything/everything
             if not input_field.is_selected():
                 input_field.click()
+        elif type == 'password':
+            input_field.send_keys('p4S$w0rd')
         elif type == 'tel':
-            input_field.send_keys('5555555555')
+            input_field.send_keys(fake_tel)
         elif type == 'submit' or type == 'button' or type == 'image':
             if (_element_contains_text(input_field, 'submit') or
                 _element_contains_text(input_field, 'sign up')):
@@ -416,8 +426,25 @@ def _form_fill_and_submit(form, email, webdriver):
             # common irrelevant input types
             pass
         else:
-            # default: assume email (TODO ?)
+            # default: assume email
             input_field.send_keys(email)
+
+    # fill in 'select' fields
+    select_fields = form.find_elements_by_tag_name('select')
+    for select_field in select_fields:
+        if not select_field.is_displayed():
+            continue
+
+        # select select element if possible, otherwise first
+        select = Select(select_field)
+        selected_index = None
+        for index in range(len(select.options)):
+            if selected_index is None:
+                selected_index = index
+            else:
+                selected_index = index
+                break
+        select.select_by_index(selected_index)
 
     # submit the form
     time.sleep(0.5)  # TODO delete me
@@ -426,6 +453,11 @@ def _form_fill_and_submit(form, email, webdriver):
             submit_button.click()  # trigger javascript events if possible
         except Exception:
             form.submit()  # fall back (e.g. if obscured by modal)
+    elif text_field is not None:
+        try:
+            text_field.send_keys(Keys.RETURN)  # press enter
+        except Exception:
+            form.submit()  # fall back
     else:
         form.submit()
     wait_until_loaded(webdriver, 5000)
