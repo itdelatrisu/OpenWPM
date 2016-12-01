@@ -367,8 +367,8 @@ def _form_fill_and_submit(form, email, webdriver):
     input_fields = form.find_elements_by_tag_name('input')
     submit_button = None
     text_field = None
-    fake_user = 'bobsmith ' + random.randrange(0,1000)
-    fake_tel = '212' + '555' + '01' + random.randrange(0,10) + random.randrange(0,10)
+    fake_user = 'bobsmith' + str(random.randrange(0,1000))
+    fake_tel = '212' + '555' + '01' + str(random.randrange(0,10)) + str(random.randrange(0,10))
     for input_field in input_fields:
         if not input_field.is_displayed():
             continue
