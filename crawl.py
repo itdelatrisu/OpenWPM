@@ -4,8 +4,11 @@ from automation import TaskManager, CommandSequence
 NUM_BROWSERS = 1
 output_dir = '~/Desktop/'
 api = 'http://lorveskel.me:8080/register'
-site_list = 'data/shopping-500.csv' #shopping-500.csv, news-500.csv, top-1m.csv
-start_site_index = 1
+site_list = 'data/replica.csv' #shopping-500.csv, news-500.csv, top-1m.csv, replica.csv
+start_site_index = 0
+def get_site(line):
+    # return 'http://' + line.strip().split(',')[1] if line.count(',') >= 1 else None
+    return line
 
 # Loads the manager preference and 3 copies of the default browser dictionaries
 manager_params, browser_params = TaskManager.load_default_params(NUM_BROWSERS)
@@ -38,11 +41,9 @@ with open(site_list) as f:
         index += 1
         if index < start_site_index:
             continue
-        tokens = line.strip().split(',')
-        if len(tokens) < 2:
-            break
-        site = 'http://' + tokens[1]
-        crawl_site(site, manager, api)
+        site = get_site(line)
+        if site is not None:
+            crawl_site(site, manager, api)
 
 # Shuts down the browsers and waits for the data to finish logging
 manager.close()

@@ -280,7 +280,9 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
             link_text = link.text.lower()
             if ('weekly ad' in link_text or 'newsletter' in link_text or
                 'subscribe' in link_text or 'inbox' in link_text or
-                'signup' in link_text or 'sign up' in link_text):
+                'signup' in link_text or 'sign up' in link_text or
+                'login' in link_text or 'log in' in link_text or
+                'register' in link_text):
                 next_link = link
                 visited_links.add(href)
                 break
@@ -386,7 +388,8 @@ def _form_fill_and_submit(form, email, webdriver):
                 _element_contains_text(input_field, 'newsletter')):
                 input_field.send_keys(email)
             elif _element_contains_text(input_field, 'name'):
-                if _element_contains_text(input_field, 'user'):
+                if (_element_contains_text(input_field, 'user') or
+                    _element_contains_text(input_field, 'account')):
                     input_field.send_keys(fake_user)
                 elif _element_contains_text(input_field, 'first'):
                     input_field.send_keys('Bob')
