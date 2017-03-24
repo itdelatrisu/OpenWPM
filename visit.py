@@ -1,7 +1,7 @@
 from automation import TaskManager, CommandSequence
 import sqlite3
 from urllib2 import Request, urlopen, URLError
-import json, os, time
+import copy, json, os, time
 
 # Constants
 NUM_BROWSERS = 1
@@ -26,7 +26,7 @@ manager_params['database_name'] = 'visit.sqlite'
 # Visits the sites with all browsers simultaneously
 def crawl_site(site, manager):
     command_sequence = CommandSequence.CommandSequence(site)
-    command_sequence.get(sleep=1, timeout=90)
+    command_sequence.get(sleep=1, timeout=120)
     manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
 
 # Mail API functions
@@ -55,16 +55,15 @@ def api_send_results(id, requests):
 
 # Database functions
 db = os.path.expanduser(os.path.join(manager_params['data_directory'], manager_params['database_name']))
-def get_crawl_id(db, url):
-    with sqlite3.connect(db) as conn:
-        sql = 'SELECT `crawl_id` FROM `CrawlHistory` WHERE `arguments` = ? ORDER BY `dtg` DESC LIMIT 1;'
-        rows = conn.execute(sql, (url,)).fetchall()
-        return None if not rows else rows[0][0]
-def get_crawl_urls(db, crawl_id):
-    with sqlite3.connect(db) as conn:
-        sql = 'SELECT `url`, `referrer` FROM `http_requests` WHERE `crawl_id` = ?;'
-        rows = conn.execute(sql, (crawl_id,)).fetchall()
-        return rows
+def get_connection(db):
+    return sqlite3.connect(db)
+def get_crawl_id(conn, url):
+    sql = 'SELECT `crawl_id` FROM `CrawlHistory` WHERE `arguments` = ? ORDER BY `dtg` DESC LIMIT 1;'
+    rows = conn.execute(sql, (url,)).fetchall()
+    return None if not rows else rows[0][0]
+def get_crawl_urls(conn, crawl_id):
+    sql = 'SELECT `url`, `referrer` FROM `http_requests` WHERE `crawl_id` = ?;'
+    return conn.execute(sql, (crawl_id,)).fetchall()
 
 # Poll the mail API repeatedly
 while True:
@@ -75,16 +74,21 @@ while True:
         requests = []
         for site in data['links']:
             # Visit the site (need new manager each time to finalize database entries)
-            manager = TaskManager.TaskManager(manager_params, browser_params)
+            manager = TaskManager.TaskManager(copy.deepcopy(manager_params), copy.deepcopy(browser_params))
             crawl_site(site, manager)
             manager.close()
 
             # Parse the data
-            crawl_id = get_crawl_id(db, site)
+            conn = get_connection(db)
+            crawl_id = get_crawl_id(conn, site)
             if crawl_id:
-                urls = get_crawl_urls(db, crawl_id)
+                urls = get_crawl_urls(conn, crawl_id)
                 if urls:
                     requests.extend(urls)
+            conn.close()
+
+            # Clean up
+            os.remove(db)
 
         # Send the results back
         api_send_results(data['id'], requests)
