@@ -5,14 +5,14 @@ import json, os, time
 
 # Constants
 NUM_BROWSERS = 1
-output_dir = '~/Desktop/'
+output_dir = 'output_visit/'
 
-# Loads the manager preference and 3 copies of the default browser dictionaries
+# Loads the manager preference and the default browser dictionaries
 manager_params, browser_params = TaskManager.load_default_params(NUM_BROWSERS)
 
 # Update browser configuration (use this for per-browser settings)
 for i in xrange(NUM_BROWSERS):
-    browser_params[i]['headless'] = False
+    browser_params[i]['headless'] = True
     browser_params[i]['bot_mitigation'] = True
     browser_params[i]['disable_flash'] = True
     browser_params[i]['disable_images'] = False
@@ -26,7 +26,7 @@ manager_params['database_name'] = 'visit.sqlite'
 # Visits the sites with all browsers simultaneously
 def crawl_site(site, manager):
     command_sequence = CommandSequence.CommandSequence(site)
-    command_sequence.get(sleep=1, timeout=60)
+    command_sequence.get(sleep=1, timeout=90)
     manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
 
 # Mail API functions
@@ -71,6 +71,7 @@ while True:
     data = api_get_sites()
     if data:
         # Got data, visit the sites
+        print('Got %d links for ID %d.' % (len(data['links']), data['id']))
         requests = []
         for site in data['links']:
             # Visit the site (need new manager each time to finalize database entries)
@@ -87,5 +88,6 @@ while True:
 
         # Send the results back
         api_send_results(data['id'], requests)
+        print('Sent %d results for ID %d.' % (len(requests), data['id']))
 
     time.sleep(POLL_INTERVAL)
