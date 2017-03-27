@@ -1,5 +1,6 @@
 import browser_commands
 import profile_commands
+import custom_commands
 
 
 def execute_command(command, webdriver, proxy_queue, browser_settings, browser_params, manager_params, extension_socket):
@@ -60,6 +61,6 @@ def execute_command(command, webdriver, proxy_queue, browser_settings, browser_p
         command[1](*command[2], **arg_dict)
 
     if command[0] == 'FIND_NEWSLETTERS':
-        browser_commands.find_newsletters(url=command[1], api=command[2], num_links=command[3], visit_id=command[4],
-                                          webdriver=webdriver, proxy_queue=proxy_queue, browser_params=browser_params,
-                                          manager_params=manager_params, extension_socket=extension_socket)
+        custom_commands.find_newsletters(url=command[1], api=command[2], num_links=command[3], visit_id=command[4],
+                                         webdriver=webdriver, proxy_queue=proxy_queue, browser_params=browser_params,
+                                         manager_params=manager_params, extension_socket=extension_socket)
