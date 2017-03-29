@@ -62,7 +62,7 @@ def get_crawl_id(conn, url):
     rows = conn.execute(sql, (url,)).fetchall()
     return None if not rows else rows[0][0]
 def get_crawl_urls(conn, crawl_id):
-    sql = 'SELECT `url`, `referrer` FROM `http_requests` WHERE `crawl_id` = ?;'
+    sql = 'SELECT `url`, `referrer`, `post_body` FROM `http_requests` WHERE `crawl_id` = ?;'
     return conn.execute(sql, (crawl_id,)).fetchall()
 
 # Poll the mail API repeatedly
