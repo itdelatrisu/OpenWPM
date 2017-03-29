@@ -4,10 +4,40 @@ from urllib import urlencode
 from urllib2 import Request, urlopen, URLError
 import random
 import time
+import timeit
+import datetime
 
 from ..MPLogger import loggingclient
 from utils.webdriver_extensions import wait_until_loaded, get_intra_links
-from browser_commands import get_website
+from browser_commands import get_website, bot_mitigation
+
+# link text ranking
+_TYPE_TEXT = 'text'
+_TYPE_HREF = 'href'
+_LINK_TEXT_RANK = [
+    # probably newsletters
+    (_TYPE_TEXT, 'weekly ad', 10),
+    (_TYPE_TEXT, 'newsletter', 10),
+    (_TYPE_TEXT, 'subscribe', 9),
+    (_TYPE_TEXT, 'inbox', 8),
+
+    # sign-up links (for something?)
+    (_TYPE_TEXT, 'signup', 5),
+    (_TYPE_TEXT, 'sign up', 5),
+    (_TYPE_TEXT, 'register', 4),
+    (_TYPE_TEXT, 'create', 4),
+
+    # news articles (sometimes sign-up links are on these pages...)
+    (_TYPE_HREF, '/article', 3),
+    (_TYPE_HREF, 'news/', 3),
+    (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2),
+    (_TYPE_HREF, 'sports', 1),
+    (_TYPE_HREF, 'technology', 1),
+    (_TYPE_HREF, 'business', 1),
+    (_TYPE_HREF, 'politics', 1),
+    (_TYPE_HREF, 'entertainment', 1),
+]
+_LINK_MATCH_TIMEOUT = 20  # maximum time to match links, in seconds
 
 def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, browser_params,
                      manager_params, extension_socket, page_timeout=8):
@@ -27,16 +57,6 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
 
     # otherwise, scan more pages
     main_handle = webdriver.current_window_handle
-    link_text_rank = [
-        ('weekly ad', 10),
-        ('newsletter', 10),
-        ('subscribe', 9),
-        ('inbox', 8),
-        ('signup', 5),
-        ('sign up', 5),
-        ('register', 4),
-        ('create', 4),
-    ]
     visited_links = set()
     for i in xrange(num_links):
         # get all links on the page
@@ -46,6 +66,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
 
         # find links to click
         match_links = []
+        start_time = timeit.default_timer()
         for link in links:
             # check if link is valid and not already visited
             href = link.get_attribute('href')
@@ -54,13 +75,17 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
 
             # should we click this link?
             link_text = link.text.lower()
-            rank = 0
-            for s, v in link_text_rank:
-                if s in link_text:
-                    rank = v
-                    match_links.append((link, v, link_text, href))
+            link_rank = 0
+            for type, s, rank in _LINK_TEXT_RANK:
+                if (type == _TYPE_TEXT and s in link_text) or (type == _TYPE_HREF and s in href):
+                    link_rank = rank
+                    match_links.append((link, rank, link_text, href))
                     break
-            if rank > 5:  # good enough, stop looking
+            if link_rank > 5:  # good enough, stop looking
+                break
+
+            # quit if too much time passed (for some reason, this is really slow...)
+            if match_links and timeit.default_timer() - start_time > _LINK_MATCH_TIMEOUT:
                 break
 
         # find the best link to click
