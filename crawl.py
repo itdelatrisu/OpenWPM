@@ -4,7 +4,7 @@ from automation import TaskManager, CommandSequence
 NUM_BROWSERS = 1
 output_dir = 'output_crawl/'
 api = 'http://lorveskel.me:8080/register'
-site_list = 'data/news-500.csv' #shopping-500.csv, news-500.csv, top-1m.csv, replica.csv
+site_list = 'data/shopping-500.csv' #shopping-500.csv, news-500.csv, top-1m.csv, replica.csv
 start_site_index = 0
 def get_site(line):
     return 'http://' + line.strip().split(',')[1] if line.count(',') >= 1 else None
@@ -31,7 +31,7 @@ manager = TaskManager.TaskManager(manager_params, browser_params)
 
 # Visits the sites with all browsers simultaneously
 def crawl_site(site, manager, api):
-    command_sequence = CommandSequence.CommandSequence(site, reset=True)
+    command_sequence = CommandSequence.CommandSequence(site)
     command_sequence.find_newsletters(api=api, num_links=4, timeout=120)
     manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
 

@@ -8,10 +8,10 @@ import timeit
 import datetime
 
 from ..MPLogger import loggingclient
-from utils.webdriver_extensions import wait_until_loaded, get_intra_links
+from utils.webdriver_extensions import wait_until_loaded
 from browser_commands import get_website, bot_mitigation
 
-# link text ranking
+# Link text ranking
 _TYPE_TEXT = 'text'
 _TYPE_HREF = 'href'
 _LINK_TEXT_RANK = [
@@ -31,13 +31,17 @@ _LINK_TEXT_RANK = [
     (_TYPE_HREF, '/article', 3),
     (_TYPE_HREF, 'news/', 3),
     (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2),
-    (_TYPE_HREF, 'sports', 1),
     (_TYPE_HREF, 'technology', 1),
     (_TYPE_HREF, 'business', 1),
     (_TYPE_HREF, 'politics', 1),
     (_TYPE_HREF, 'entertainment', 1),
 ]
+_LINK_RANK_SKIP = 6  # minimum rank to select immediately (skipping the rest of the links)
 _LINK_MATCH_TIMEOUT = 20  # maximum time to match links, in seconds
+_LINK_TEXT_BLACKLIST = ['unsubscribe', 'mobile', 'phone']
+
+# Other constants
+_PAGE_LOAD_TIME = 5  # time to wait for pages to load (in seconds)
 
 def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, browser_params,
                      manager_params, extension_socket, page_timeout=8):
@@ -60,29 +64,43 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
     visited_links = set()
     for i in xrange(num_links):
         # get all links on the page
-        #links = get_intra_links(webdriver, url)
-        #links = filter(lambda x: x.is_displayed() == True, links)
         links = webdriver.find_elements_by_tag_name('a')
 
         # find links to click
         match_links = []
         start_time = timeit.default_timer()
         for link in links:
-            # check if link is valid and not already visited
-            href = link.get_attribute('href')
-            if href is None or href in visited_links:
-                continue
+            try:
+                if not link.is_displayed():
+                    continue
 
-            # should we click this link?
-            link_text = link.text.lower()
-            link_rank = 0
-            for type, s, rank in _LINK_TEXT_RANK:
-                if (type == _TYPE_TEXT and s in link_text) or (type == _TYPE_HREF and s in href):
-                    link_rank = rank
-                    match_links.append((link, rank, link_text, href))
+                # check if link is valid and not already visited
+                href = link.get_attribute('href')
+                if href is None or href in visited_links:
+                    continue
+
+                link_text = link.text.lower()
+
+                # skip links with blacklisted text
+                blacklisted = False
+                for bl_text in _LINK_TEXT_BLACKLIST:
+                    if bl_text in link_text:
+                        blacklisted = True
+                        break
+                if blacklisted:
+                    continue
+
+                # should we click this link?
+                link_rank = 0
+                for type, s, rank in _LINK_TEXT_RANK:
+                    if (type == _TYPE_TEXT and s in link_text) or (type == _TYPE_HREF and s in href):
+                        link_rank = rank
+                        match_links.append((link, rank, link_text, href))
+                        break
+                if link_rank >= _LINK_RANK_SKIP:  # good enough, stop looking
                     break
-            if link_rank > 5:  # good enough, stop looking
-                break
+            except:
+                logger.error("error while looping through links...")
 
             # quit if too much time passed (for some reason, this is really slow...)
             if match_links and timeit.default_timer() - start_time > _LINK_MATCH_TIMEOUT:
@@ -100,7 +118,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
             # load the page
             logger.info("clicking on link '%s' - %s" % (next_link[2], next_link[3]))
             next_link[0].click()
-            wait_until_loaded(webdriver, 5000)
+            wait_until_loaded(webdriver, _PAGE_LOAD_TIME)
             if browser_params['bot_mitigation']:
                 bot_mitigation(webdriver)
 
@@ -110,7 +128,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
 
             # go back
             webdriver.back()
-            wait_until_loaded(webdriver, 5000)
+            wait_until_loaded(webdriver, _PAGE_LOAD_TIME)
 
             # close other windows (popups or "tabs")
             windows = webdriver.window_handles
@@ -147,7 +165,7 @@ def _find_and_fill_form(webdriver, api, logger):
     logger.info('submitted form on [%s] with email [%s]', current_url, email)
 
     # fill any follow-up forms
-    wait_until_loaded(webdriver, 5000)  # wait if we got redirected
+    wait_until_loaded(webdriver, _PAGE_LOAD_TIME)  # wait if we got redirected
     follow_up_form = _find_newsletter_form(webdriver)
     if follow_up_form is not None:
         _form_fill_and_submit(follow_up_form, email, webdriver, current_url != webdriver.current_url)
@@ -243,6 +261,16 @@ def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
                 if not ignore_nonempty_email or email not in input_field.get_attribute('value'):
                     input_field.send_keys(email)
             text_field = input_field
+        elif type == 'number':
+            if (_element_contains_text(input_field, 'phone') or
+                _element_contains_text(input_field, 'tel') or
+                _element_contains_text(input_field, 'mobile')):
+                input_field.send_keys(fake_tel)
+            elif (_element_contains_text(input_field, 'zip') or
+                  _element_contains_text(input_field, 'postal')):
+                input_field.send_keys('12345')
+            else:
+                input_field.send_keys('12345')
         elif type == 'checkbox' or type == 'radio':
             # check anything/everything
             if not input_field.is_selected():
