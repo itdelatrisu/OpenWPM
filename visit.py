@@ -2,6 +2,7 @@ from automation import TaskManager, CommandSequence
 import sqlite3
 from urllib2 import Request, urlopen, URLError
 import copy, json, os, time
+import StringIO, gzip
 
 # Constants
 NUM_BROWSERS = 1
@@ -46,12 +47,21 @@ def api_get_sites():
 def api_send_results(id, requests):
     try:
         data = json.dumps({'id': id, 'requests': requests})
-        req = Request(api_results, data, {'Content-Type': 'application/json'})
+        data = gzips(data)
+        req = Request(api_results, data, {
+            'Content-Type': 'application/json',
+            'Content-Encoding': 'gzip',
+        })
         f = urlopen(req)
         response = f.read()
         f.close()
     except:
         pass
+def gzips(s):
+    out = StringIO.StringIO()
+    with gzip.GzipFile(fileobj=out, mode='w') as f:
+        f.write(s)
+    return out.getvalue()
 
 # Database functions
 db = os.path.expanduser(os.path.join(manager_params['data_directory'], manager_params['database_name']))
