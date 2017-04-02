@@ -18,6 +18,7 @@ _TYPE_TEXT = 'text'
 _TYPE_HREF = 'href'
 _FLAG_NONE = 0
 _FLAG_STAY_ON_PAGE = 1
+_FLAG_IN_NEW_URL_ONLY = 2
 _LINK_TEXT_RANK = [
     # probably newsletters
     (_TYPE_TEXT, 'newsletter', 10, _FLAG_NONE),
@@ -35,17 +36,17 @@ _LINK_TEXT_RANK = [
 
     # news articles (sometimes sign-up links are on these pages...)
     (_TYPE_HREF, '/article', 3, _FLAG_NONE),
-    (_TYPE_HREF, 'news/', 3, _FLAG_NONE),
+    (_TYPE_HREF, 'news/',    3, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
     (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2, _FLAG_NONE),
-    (_TYPE_HREF, 'technology', 1, _FLAG_NONE),
-    (_TYPE_HREF, 'business', 1, _FLAG_NONE),
-    (_TYPE_HREF, 'politics', 1, _FLAG_NONE),
-    (_TYPE_HREF, 'entertainment', 1, _FLAG_NONE),
+    (_TYPE_HREF, 'technology',    1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'business',      1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'politics',      1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'entertainment', 1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
 
     # country selectors (for country-selection landing pages)
-    (_TYPE_HREF, '/us/', 1, _FLAG_STAY_ON_PAGE),
-    (_TYPE_HREF, '=us&', 1, _FLAG_STAY_ON_PAGE),
-    (_TYPE_HREF, 'en-us', 1, _FLAG_STAY_ON_PAGE),
+    (_TYPE_HREF, '/us/',  1, _FLAG_STAY_ON_PAGE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, '=us&',  1, _FLAG_STAY_ON_PAGE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'en-us', 1, _FLAG_STAY_ON_PAGE | _FLAG_IN_NEW_URL_ONLY),
 ]
 _LINK_RANK_SKIP = 6  # minimum rank to select immediately (skipping the rest of the links)
 _LINK_MATCH_TIMEOUT = 20  # maximum time to match links, in seconds
@@ -112,6 +113,12 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
                 link_rank = 0
                 for type, s, rank, flags in _LINK_TEXT_RANK:
                     if (type == _TYPE_TEXT and s in link_text) or (type == _TYPE_HREF and s in href):
+                        if flags & _FLAG_IN_NEW_URL_ONLY:
+                            # don't use this link if the current page URL already matches too
+                            if type == _TYPE_HREF and s in current_url:
+                                continue
+
+                        # link matches!
                         link_rank = rank
                         match_links.append((link, rank, link_text, href, flags))
                         break
@@ -171,7 +178,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
 
                 if form_found_in_popup:
                     return
-        except Exception:
+        except:
             pass
 
 def _get_email_from_api(api, webdriver, logger):
@@ -259,23 +266,15 @@ def _get_z_index(element, webdriver):
         try:
             # selenium is usually wrong, don't bother with this
             #z = element.value_of_css_property('z-index')
-            #if z and z != 'auto':
-            #    try:
-            #        return int(z)
-            #    except ValueError:
-            #        pass
 
             # get z-index with javascript
-            id = e.get_attribute('id')
-            if id:
-                scriptId = 'window.document.getElementById("%s")' % id
-                script = 'return window.document.defaultView.getComputedStyle(%s, null).getPropertyValue("z-index")' % scriptId
-                z = webdriver.execute_script(script)
-                if z and z != 'auto':
-                    try:
-                        return int(z)
-                    except ValueError:
-                        pass
+            script = 'return window.document.defaultView.getComputedStyle(arguments[0], null).getPropertyValue("z-index")'
+            z = webdriver.execute_script(script, e)
+            if z != None and z != 'auto':
+                try:
+                    return int(z)
+                except ValueError:
+                    pass
 
             # try the parent...
             e = e.find_element_by_xpath('..')  # throws exception when parent is the <html> tag
@@ -354,7 +353,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         elif type == 'tel':
             _type_in_field(input_field, fake_tel, clear)
         elif type == 'submit' or type == 'button' or type == 'image':
-            if _element_contains_text(input_field, ['submit', 'sign up', 'sign-up', 'signup']):
+            if _element_contains_text(input_field, ['submit', 'sign up', 'sign-up', 'signup', 'subscribe']):
                 submit_button = input_field
         elif type == 'reset' or type == 'hidden' or type == 'search':
             # common irrelevant input types
@@ -377,7 +376,8 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         selected_index = None
         for i, opt in enumerate(select_options):
             opt_text = opt.text.lower()
-            if 'yes' in opt_text or 'ny' in opt_text or 'new york' in opt_text:
+            if ('yes' in opt_text or 'ny' in opt_text or 'new york' in opt_text or
+                'united states' in opt_text or 'usa' in opt_text):
                 selected_index = i
                 break
         if selected_index is None:
@@ -388,12 +388,12 @@ def _form_fill_and_submit(form, email, webdriver, clear):
     if submit_button is not None:
         try:
             submit_button.click()  # trigger javascript events if possible
-        except Exception:
+        except:
             form.submit()  # fall back (e.g. if obscured by modal)
     elif text_field is not None:
         try:
             text_field.send_keys(Keys.RETURN)  # press enter
-        except Exception:
+        except:
             form.submit()  # fall back
     else:
         form.submit()
