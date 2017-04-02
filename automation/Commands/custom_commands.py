@@ -306,9 +306,9 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             elif _element_contains_text(input_field, 'name'):
                 if _element_contains_text(input_field, ['user', 'account']):
                     _type_in_field(input_field, fake_user, clear)
-                elif _element_contains_text(input_field, 'first'):
+                elif _element_contains_text(input_field, ['first', 'forename']):
                     _type_in_field(input_field, 'Bob', clear)
-                elif _element_contains_text(input_field, 'last'):
+                elif _element_contains_text(input_field, ['last', 'surname']):
                     _type_in_field(input_field, 'Smith', clear)
                 elif _element_contains_text(input_field, 'company'):
                     _type_in_field(input_field, 'Smith & Co.', clear)
@@ -353,7 +353,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         elif type == 'tel':
             _type_in_field(input_field, fake_tel, clear)
         elif type == 'submit' or type == 'button' or type == 'image':
-            if _element_contains_text(input_field, ['submit', 'sign up', 'sign-up', 'signup', 'subscribe']):
+            if _element_contains_text(input_field, ['submit', 'sign up', 'sign-up', 'signup', 'subscribe', 'register']):
                 submit_button = input_field
         elif type == 'reset' or type == 'hidden' or type == 'search':
             # common irrelevant input types
@@ -361,6 +361,23 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         else:
             # default: assume email
             _type_in_field(input_field, email, clear)
+
+    # find 'button' tags (if necessary)
+    if submit_button is None:
+        buttons = form.find_elements_by_tag_name('button')
+        for button in buttons:
+            if not button.is_displayed():
+                continue
+
+            # filter out non-submit button types
+            type = button.get_attribute('type').lower()
+            if type is not None and (type == 'reset' or type == 'menu'):
+                continue
+
+            # pick first matching button
+            if _element_contains_text(button, ['submit', 'sign up', 'sign-up', 'signup', 'subscribe', 'register']):
+                submit_button = button
+                break
 
     # fill in 'select' fields
     select_fields = form.find_elements_by_tag_name('select')
@@ -376,8 +393,10 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         selected_index = None
         for i, opt in enumerate(select_options):
             opt_text = opt.text.lower()
-            if ('yes' in opt_text or 'ny' in opt_text or 'new york' in opt_text or
-                'united states' in opt_text or 'usa' in opt_text):
+            if ('yes' in opt_text or
+                'ny' in opt_text or 'new york' in opt_text or
+                'united states' in opt_text or 'usa' in opt_text or
+                'mr' in opt_text or 'mister' in opt_text):
                 selected_index = i
                 break
         if selected_index is None:
@@ -400,7 +419,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
 
 def _element_contains_text(element, text):
     """Scans various element attributes for the given text."""
-    attributes = ['name', 'class', 'id', 'placeholder', 'value']
+    attributes = ['name', 'class', 'id', 'placeholder', 'value', 'for']
     text_list = text if type(text) is list else [text]
     for s in text_list:
         for attr in attributes:
