@@ -2,39 +2,50 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select
 from urllib import urlencode
 from urllib2 import Request, urlopen, URLError
+from urlparse import urljoin
 import random
 import time
 import timeit
 import datetime
 
 from ..MPLogger import loggingclient
+from ..utilities import domain_utils
 from utils.webdriver_extensions import wait_until_loaded
 from browser_commands import get_website, bot_mitigation
 
 # Link text ranking
 _TYPE_TEXT = 'text'
 _TYPE_HREF = 'href'
+_FLAG_NONE = 0
+_FLAG_STAY_ON_PAGE = 1
 _LINK_TEXT_RANK = [
     # probably newsletters
-    (_TYPE_TEXT, 'weekly ad', 10),
-    (_TYPE_TEXT, 'newsletter', 10),
-    (_TYPE_TEXT, 'subscribe', 9),
-    (_TYPE_TEXT, 'inbox', 8),
+    (_TYPE_TEXT, 'newsletter', 10, _FLAG_NONE),
+    (_TYPE_TEXT, 'weekly ad',   9, _FLAG_NONE),
+    (_TYPE_TEXT, 'subscribe',   9, _FLAG_NONE),
+    (_TYPE_TEXT, 'inbox',       8, _FLAG_NONE),
+    (_TYPE_TEXT, 'email',       7, _FLAG_NONE),
+    (_TYPE_TEXT, 'sale alert',  6, _FLAG_NONE),
 
     # sign-up links (for something?)
-    (_TYPE_TEXT, 'signup', 5),
-    (_TYPE_TEXT, 'sign up', 5),
-    (_TYPE_TEXT, 'register', 4),
-    (_TYPE_TEXT, 'create', 4),
+    (_TYPE_TEXT, 'signup',   5, _FLAG_NONE),
+    (_TYPE_TEXT, 'sign up',  5, _FLAG_NONE),
+    (_TYPE_TEXT, 'register', 4, _FLAG_NONE),
+    (_TYPE_TEXT, 'create',   4, _FLAG_NONE),
 
     # news articles (sometimes sign-up links are on these pages...)
-    (_TYPE_HREF, '/article', 3),
-    (_TYPE_HREF, 'news/', 3),
-    (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2),
-    (_TYPE_HREF, 'technology', 1),
-    (_TYPE_HREF, 'business', 1),
-    (_TYPE_HREF, 'politics', 1),
-    (_TYPE_HREF, 'entertainment', 1),
+    (_TYPE_HREF, '/article', 3, _FLAG_NONE),
+    (_TYPE_HREF, 'news/', 3, _FLAG_NONE),
+    (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2, _FLAG_NONE),
+    (_TYPE_HREF, 'technology', 1, _FLAG_NONE),
+    (_TYPE_HREF, 'business', 1, _FLAG_NONE),
+    (_TYPE_HREF, 'politics', 1, _FLAG_NONE),
+    (_TYPE_HREF, 'entertainment', 1, _FLAG_NONE),
+
+    # country selectors (for country-selection landing pages)
+    (_TYPE_HREF, '/us/', 1, _FLAG_STAY_ON_PAGE),
+    (_TYPE_HREF, '=us&', 1, _FLAG_STAY_ON_PAGE),
+    (_TYPE_HREF, 'en-us', 1, _FLAG_STAY_ON_PAGE),
 ]
 _LINK_RANK_SKIP = 6  # minimum rank to select immediately (skipping the rest of the links)
 _LINK_MATCH_TIMEOUT = 20  # maximum time to match links, in seconds
@@ -66,6 +77,9 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
         # get all links on the page
         links = webdriver.find_elements_by_tag_name('a')
 
+        current_url = webdriver.current_url
+        current_ps1 = domain_utils.get_ps_plus_1(current_url)
+
         # find links to click
         match_links = []
         start_time = timeit.default_timer()
@@ -77,6 +91,10 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
                 # check if link is valid and not already visited
                 href = link.get_attribute('href')
                 if href is None or href in visited_links:
+                    continue
+
+                # check if this is an internal link
+                if not _is_internal_link(href, current_url, current_ps1):
                     continue
 
                 link_text = link.text.lower()
@@ -92,10 +110,10 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
 
                 # should we click this link?
                 link_rank = 0
-                for type, s, rank in _LINK_TEXT_RANK:
+                for type, s, rank, flags in _LINK_TEXT_RANK:
                     if (type == _TYPE_TEXT and s in link_text) or (type == _TYPE_HREF and s in href):
                         link_rank = rank
-                        match_links.append((link, rank, link_text, href))
+                        match_links.append((link, rank, link_text, href, flags))
                         break
                 if link_rank >= _LINK_RANK_SKIP:  # good enough, stop looking
                     break
@@ -126,19 +144,33 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
             if _find_and_fill_form(webdriver, api, logger):
                 return
 
+            # should we stay on this page?
+            if next_link[4] & _FLAG_STAY_ON_PAGE:
+                continue
+
             # go back
             webdriver.back()
             wait_until_loaded(webdriver, _PAGE_LOAD_TIME)
 
-            # close other windows (popups or "tabs")
+            # check other windows (ex. pop-ups)
             windows = webdriver.window_handles
             if len(windows) > 1:
+                form_found_in_popup = False
                 for window in windows:
                     if window != main_handle:
                         webdriver.switch_to_window(window)
+                        wait_until_loaded(webdriver, _PAGE_LOAD_TIME)
+
+                        # find newsletter form
+                        if _find_and_fill_form(webdriver, api, logger):
+                            form_found_in_popup = True
+
                         webdriver.close()
                 webdriver.switch_to_window(main_handle)
                 time.sleep(1)
+
+                if form_found_in_popup:
+                    return
         except Exception:
             pass
 
@@ -152,6 +184,12 @@ def _get_email_from_api(api, webdriver, logger):
     response = urlopen(req)
     return response.read()
 
+def _is_internal_link(href, url, ps1=None):
+    """Returns whether the given link is an internal link."""
+    if ps1 is None:
+        ps1 = domain_utils.get_ps_plus_1(url)
+    return domain_utils.get_ps_plus_1(urljoin(url, href)) == ps1
+
 def _find_and_fill_form(webdriver, api, logger):
     """Finds and fills a form, and returns True if accomplished."""
     # try to find newsletter form on landing page
@@ -161,14 +199,14 @@ def _find_and_fill_form(webdriver, api, logger):
 
     current_url = webdriver.current_url
     email = _get_email_from_api(api, webdriver, logger)
-    _form_fill_and_submit(newsletter_form, email, webdriver)
+    _form_fill_and_submit(newsletter_form, email, webdriver, False)
     logger.info('submitted form on [%s] with email [%s]', current_url, email)
 
     # fill any follow-up forms
     wait_until_loaded(webdriver, _PAGE_LOAD_TIME)  # wait if we got redirected
     follow_up_form = _find_newsletter_form(webdriver)
     if follow_up_form is not None:
-        _form_fill_and_submit(follow_up_form, email, webdriver, current_url != webdriver.current_url)
+        _form_fill_and_submit(follow_up_form, email, webdriver, True)
 
     return True
 
@@ -195,10 +233,7 @@ def _find_newsletter_form(webdriver):
                     match = True
                     break
                 elif type == 'text':
-                    if (_element_contains_text(input_field, 'email') or
-                        _element_contains_text(input_field, 'e-mail') or
-                        _element_contains_text(input_field, 'subscribe') or
-                        _element_contains_text(input_field, 'newsletter')):
+                    if _element_contains_text(input_field, ['email', 'e-mail', 'subscribe', 'newsletter']):
                         match = True
                         break
 
@@ -248,7 +283,7 @@ def _get_z_index(element, webdriver):
             break
     return 0
 
-def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
+def _form_fill_and_submit(form, email, webdriver, clear):
     """Fills out a form and submits it, then waits for the response."""
     # try to fill all input fields in the form...
     input_fields = form.find_elements_by_tag_name('input')
@@ -263,85 +298,70 @@ def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
         type = input_field.get_attribute('type').lower()
         if type == 'email':
             # using html5 "email" type, this is probably an email field
-            if not ignore_nonempty_email or email not in input_field.get_attribute('value'):
-                input_field.send_keys(email)
+            _type_in_field(input_field, email, clear)
             text_field = input_field
         elif type == 'text':
             # try to decipher this based on field attributes
-            if (_element_contains_text(input_field, 'email') or
-                _element_contains_text(input_field, 'e-mail') or
-                _element_contains_text(input_field, 'subscribe') or
-                _element_contains_text(input_field, 'newsletter')):
-                if not ignore_nonempty_email or email not in input_field.get_attribute('value'):
-                    input_field.send_keys(email)
+            if _element_contains_text(input_field, ['email', 'e-mail', 'subscribe', 'newsletter']):
+                _type_in_field(input_field, email, clear)
             elif _element_contains_text(input_field, 'name'):
-                if (_element_contains_text(input_field, 'user') or
-                    _element_contains_text(input_field, 'account')):
-                    input_field.send_keys(fake_user)
+                if _element_contains_text(input_field, ['user', 'account']):
+                    _type_in_field(input_field, fake_user, clear)
                 elif _element_contains_text(input_field, 'first'):
-                    input_field.send_keys('Bob')
+                    _type_in_field(input_field, 'Bob', clear)
                 elif _element_contains_text(input_field, 'last'):
-                    input_field.send_keys('Smith')
+                    _type_in_field(input_field, 'Smith', clear)
                 elif _element_contains_text(input_field, 'company'):
-                    input_field.send_keys('Smith & Co.')
+                    _type_in_field(input_field, 'Smith & Co.', clear)
+                elif _element_contains_text(input_field, 'title'):
+                    _type_in_field(input_field, 'Mr.', clear)
                 else:
-                    input_field.send_keys('Bob Smith')
-            elif (_element_contains_text(input_field, 'phone') or
-                  _element_contains_text(input_field, 'tel') or
-                  _element_contains_text(input_field, 'mobile')):
-                input_field.send_keys(fake_tel)
-            elif (_element_contains_text(input_field, 'zip') or
-                  _element_contains_text(input_field, 'postal')):
-                input_field.send_keys('12345')
-            elif (_element_contains_text(input_field, 'street') or
-                  _element_contains_text(input_field, 'address')):
-                if (_element_contains_text(input_field, '2') or
-                    _element_contains_text(input_field, 'number')):
-                    input_field.send_keys('Apt. 101')
+                    _type_in_field(input_field, 'Bob Smith', clear)
+            elif _element_contains_text(input_field, 'title'):
+                _type_in_field(input_field, 'Mr.', clear)
+            elif _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
+                _type_in_field(input_field, fake_tel, clear)
+            elif _element_contains_text(input_field, ['zip', 'postal']):
+                _type_in_field(input_field, '12345', clear)
+            elif _element_contains_text(input_field, ['street', 'address']):
+                if _element_contains_text(input_field, ['2', 'number']):
+                    _type_in_field(input_field, 'Apt. 101', clear)
                 elif _element_contains_text(input_field, '3'):
                     pass
                 else:
-                    input_field.send_keys('101 Main St.')
+                    _type_in_field(input_field, '101 Main St.', clear)
             elif _element_contains_text(input_field, 'city'):
-                input_field.send_keys('Schenectady')
+                _type_in_field(input_field, 'Schenectady', clear)
             elif _element_contains_text(input_field, 'search'):
                 pass
             else:
                 # default: assume email
-                if not ignore_nonempty_email or email not in input_field.get_attribute('value'):
-                    input_field.send_keys(email)
+                _type_in_field(input_field, email, clear)
             text_field = input_field
         elif type == 'number':
-            if (_element_contains_text(input_field, 'phone') or
-                _element_contains_text(input_field, 'tel') or
-                _element_contains_text(input_field, 'mobile')):
-                input_field.send_keys(fake_tel)
-            elif (_element_contains_text(input_field, 'zip') or
-                  _element_contains_text(input_field, 'postal')):
-                input_field.send_keys('12345')
+            if _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
+                _type_in_field(input_field, fake_tel, clear)
+            elif _element_contains_text(input_field, ['zip', 'postal']):
+                _type_in_field(input_field, '12345', clear)
             else:
-                input_field.send_keys('12345')
+                _type_in_field(input_field, '12345', clear)
         elif type == 'checkbox' or type == 'radio':
             # check anything/everything
             if not input_field.is_selected():
                 input_field.click()
         elif type == 'password':
-            input_field.send_keys('p4S$w0rd123')
+            _type_in_field(input_field, 'p4S$w0rd123', clear)
         elif type == 'tel':
-            input_field.send_keys(fake_tel)
+            _type_in_field(input_field, fake_tel, clear)
         elif type == 'submit' or type == 'button' or type == 'image':
-            if (_element_contains_text(input_field, 'submit') or
-                _element_contains_text(input_field, 'sign up') or
-                _element_contains_text(input_field, 'sign-up') or
-                _element_contains_text(input_field, 'signup')):
+            if _element_contains_text(input_field, ['submit', 'sign up', 'sign-up', 'signup']):
                 submit_button = input_field
         elif type == 'reset' or type == 'hidden' or type == 'search':
             # common irrelevant input types
             pass
         else:
             # default: assume email
-            if not ignore_nonempty_email or email not in input_field.get_attribute('value'):
-                input_field.send_keys(email)
+            _type_in_field(input_field, email, clear)
 
     # fill in 'select' fields
     select_fields = form.find_elements_by_tag_name('select')
@@ -349,17 +369,19 @@ def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
         if not select_field.is_displayed():
             continue
 
-        # select an appropriate element if possible, otherwise first
+        # select an appropriate element if possible,
+        # otherwise second element (to skip blank fields),
+        # falling back on the first
         select = Select(select_field)
+        select_options = select.options
         selected_index = None
-        for i, opt in enumerate(select.options):
-            if selected_index is None:
+        for i, opt in enumerate(select_options):
+            opt_text = opt.text.lower()
+            if 'yes' in opt_text or 'ny' in opt_text or 'new york' in opt_text:
                 selected_index = i
-            else:
-                opt_text = opt.text.lower()
-                if 'yes' in opt_text or 'ny' in opt_text or 'new york' in opt_text:
-                    selected_index = i
-                    break
+                break
+        if selected_index is None:
+            selected_index = min(2, len(select_options))
         select.select_by_index(selected_index)
 
     # submit the form
@@ -379,8 +401,16 @@ def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
 def _element_contains_text(element, text):
     """Scans various element attributes for the given text."""
     attributes = ['name', 'class', 'id', 'placeholder', 'value']
-    for attr in attributes:
-        e = element.get_attribute(attr)
-        if e is not None and text in e.lower():
-            return True
+    text_list = text if type(text) is list else [text]
+    for s in text_list:
+        for attr in attributes:
+            e = element.get_attribute(attr)
+            if e is not None and s in e.lower():
+                return True
     return False
+
+def _type_in_field(input_field, text, clear):
+    """Types text into an input field."""
+    if clear:
+        input_field.send_keys(Keys.CONTROL, 'a')
+    input_field.send_keys(text)

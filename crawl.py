@@ -32,7 +32,7 @@ manager = TaskManager.TaskManager(manager_params, browser_params)
 # Visits the sites with all browsers simultaneously
 def crawl_site(site, manager, api):
     command_sequence = CommandSequence.CommandSequence(site)
-    command_sequence.find_newsletters(api=api, num_links=4, timeout=120)
+    command_sequence.find_newsletters(api=api, num_links=3, timeout=120)
     manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
 
 # Read site list
