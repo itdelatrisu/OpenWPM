@@ -176,6 +176,8 @@ def _find_newsletter_form(webdriver):
     """Tries to find a form element on the page for newsletter sign-up.
     Returns None if no form was found.
     """
+    # find all forms that match
+    newsletter_forms = []
     forms = webdriver.find_elements_by_tag_name('form')
     for form in forms:
         if not form.is_displayed():
@@ -183,20 +185,68 @@ def _find_newsletter_form(webdriver):
 
         # find words 'email' or 'newsletter' in the form
         form_html = form.get_attribute('outerHTML').lower()
+        match = False
         if 'email' in form_html or 'newsletter' in form_html:
             # check if an input field contains an email element
             input_fields = form.find_elements_by_tag_name('input')
             for input_field in input_fields:
                 type = input_field.get_attribute('type').lower()
                 if type == 'email':
-                    return form
+                    match = True
+                    break
                 elif type == 'text':
                     if (_element_contains_text(input_field, 'email') or
                         _element_contains_text(input_field, 'e-mail') or
                         _element_contains_text(input_field, 'subscribe') or
                         _element_contains_text(input_field, 'newsletter')):
-                        return form
-    return None
+                        match = True
+                        break
+
+        # if this form matched, get some other ranking criteria:
+        # rank modal/pop-up/dialogs higher, since these are likely to be sign-up forms
+        if match:
+            z_index = _get_z_index(form, webdriver)
+            has_modal_text = 'modal' in form_html or 'dialog' in form_html
+            newsletter_forms.append((form, (z_index, int(has_modal_text))))
+
+    # no matches?
+    if not newsletter_forms:
+        return None
+
+    # return highest ranked form
+    newsletter_forms.sort(key=lambda x: x[1], reverse=True)
+    return newsletter_forms[0][0]
+
+def _get_z_index(element, webdriver):
+    """Tries to find the actual z-index of an element, otherwise returns 0."""
+    e = element
+    while e is not None:
+        try:
+            # selenium is usually wrong, don't bother with this
+            #z = element.value_of_css_property('z-index')
+            #if z and z != 'auto':
+            #    try:
+            #        return int(z)
+            #    except ValueError:
+            #        pass
+
+            # get z-index with javascript
+            id = e.get_attribute('id')
+            if id:
+                scriptId = 'window.document.getElementById("%s")' % id
+                script = 'return window.document.defaultView.getComputedStyle(%s, null).getPropertyValue("z-index")' % scriptId
+                z = webdriver.execute_script(script)
+                if z and z != 'auto':
+                    try:
+                        return int(z)
+                    except ValueError:
+                        pass
+
+            # try the parent...
+            e = e.find_element_by_xpath('..')  # throws exception when parent is the <html> tag
+        except:
+            break
+    return 0
 
 def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
     """Fills out a form and submits it, then waits for the response."""
@@ -281,7 +331,9 @@ def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
             input_field.send_keys(fake_tel)
         elif type == 'submit' or type == 'button' or type == 'image':
             if (_element_contains_text(input_field, 'submit') or
-                _element_contains_text(input_field, 'sign up')):
+                _element_contains_text(input_field, 'sign up') or
+                _element_contains_text(input_field, 'sign-up') or
+                _element_contains_text(input_field, 'signup')):
                 submit_button = input_field
         elif type == 'reset' or type == 'hidden' or type == 'search':
             # common irrelevant input types
@@ -297,15 +349,17 @@ def _form_fill_and_submit(form, email, webdriver, ignore_nonempty_email=False):
         if not select_field.is_displayed():
             continue
 
-        # select select element if possible, otherwise first
+        # select an appropriate element if possible, otherwise first
         select = Select(select_field)
         selected_index = None
-        for index in range(len(select.options)):
+        for i, opt in enumerate(select.options):
             if selected_index is None:
-                selected_index = index
+                selected_index = i
             else:
-                selected_index = index
-                break
+                opt_text = opt.text.lower()
+                if 'yes' in opt_text or 'ny' in opt_text or 'new york' in opt_text:
+                    selected_index = i
+                    break
         select.select_by_index(selected_index)
 
     # submit the form
