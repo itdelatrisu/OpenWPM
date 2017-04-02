@@ -331,6 +331,8 @@ def _form_fill_and_submit(form, email, webdriver, clear):
                     _type_in_field(input_field, '101 Main St.', clear)
             elif _element_contains_text(input_field, 'city'):
                 _type_in_field(input_field, 'Schenectady', clear)
+            elif _element_contains_text(input_field, 'state'):
+                _type_in_field(input_field, 'New York', clear)
             elif _element_contains_text(input_field, 'search'):
                 pass
             else:
