@@ -29,10 +29,12 @@ _LINK_TEXT_RANK = [
     (_TYPE_TEXT, 'sale alert',  6, _FLAG_NONE),
 
     # sign-up links (for something?)
-    (_TYPE_TEXT, 'signup',   5, _FLAG_NONE),
-    (_TYPE_TEXT, 'sign up',  5, _FLAG_NONE),
-    (_TYPE_TEXT, 'register', 4, _FLAG_NONE),
-    (_TYPE_TEXT, 'create',   4, _FLAG_NONE),
+    (_TYPE_TEXT, 'signup',     5, _FLAG_NONE),
+    (_TYPE_TEXT, 'sign up',    5, _FLAG_NONE),
+    (_TYPE_TEXT, 'sign me up', 5, _FLAG_NONE),
+    (_TYPE_TEXT, 'register',   4, _FLAG_NONE),
+    (_TYPE_TEXT, 'create',     4, _FLAG_NONE),
+    (_TYPE_TEXT, 'join',       4, _FLAG_NONE),
 
     # news articles (sometimes sign-up links are on these pages...)
     (_TYPE_HREF, '/article', 3, _FLAG_NONE),
@@ -54,7 +56,7 @@ _LINK_TEXT_BLACKLIST = ['unsubscribe', 'mobile', 'phone']
 
 # Keywords
 _KEYWORDS_EMAIL  = ['email', 'e-mail', 'subscribe', 'newsletter']
-_KEYWORDS_SUBMIT = ['submit', 'sign up', 'sign-up', 'signup', 'subscribe', 'register']
+_KEYWORDS_SUBMIT = ['submit', 'sign up', 'sign-up', 'signup', 'sign me up', 'subscribe', 'register', 'join']
 
 # Other constants
 _PAGE_LOAD_TIME = 5  # time to wait for pages to load (in seconds)
@@ -186,12 +188,9 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
         except:
             pass
 
-def _get_email_from_api(api, webdriver, logger):
+def _get_email_from_api(api, url, site_title):
     """Registers an email address with the mail API, and returns the email."""
-    data = urlencode({
-        'site': webdriver.title.encode('ascii', 'replace'),
-        'url': webdriver.current_url,
-    })
+    data = urlencode({'site': site_title, 'url': url})
     req = Request(api, data)
     response = urlopen(req)
     return response.read()
@@ -204,13 +203,33 @@ def _is_internal_link(href, url, ps1=None):
 
 def _find_and_fill_form(webdriver, api, logger):
     """Finds and fills a form, and returns True if accomplished."""
+    current_url = webdriver.current_url
+    current_site_title = webdriver.title.encode('ascii', 'replace')
+    in_iframe = False
+
     # try to find newsletter form on landing page
     newsletter_form = _find_newsletter_form(webdriver)
     if newsletter_form is None:
-        return False
+        # search for forms in iframes (if present)
+        iframes = webdriver.find_elements_by_tag_name('iframe')
+        for iframe in iframes:
+            # switch to the iframe
+            webdriver.switch_to_frame(iframe)
 
-    current_url = webdriver.current_url
-    email = _get_email_from_api(api, webdriver, logger)
+            # is there a form?
+            newsletter_form = _find_newsletter_form(webdriver)
+            if newsletter_form is not None:
+                in_iframe = True
+                break  # form found, stay on the iframe
+
+            # switch back
+            webdriver.switch_to_default_content()
+
+        # still no form?
+        if newsletter_form is None:
+            return False
+
+    email = _get_email_from_api(api, current_url, current_site_title)
     _form_fill_and_submit(newsletter_form, email, webdriver, False)
     logger.info('submitted form on [%s] with email [%s]', current_url, email)
 
@@ -219,6 +238,10 @@ def _find_and_fill_form(webdriver, api, logger):
     follow_up_form = _find_newsletter_form(webdriver)
     if follow_up_form is not None:
         _form_fill_and_submit(follow_up_form, email, webdriver, True)
+
+	# switch back
+    if in_iframe:
+        webdriver.switch_to_default_content()
 
     return True
 
