@@ -1,5 +1,7 @@
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import Select, WebDriverWait
+from selenium.webdriver.support import expected_conditions
+from selenium.common.exceptions import TimeoutException
 from urllib import urlencode
 from urllib2 import Request, urlopen, URLError
 from urlparse import urljoin
@@ -60,6 +62,7 @@ _KEYWORDS_SUBMIT = ['submit', 'sign up', 'sign-up', 'signup', 'sign me up', 'sub
 
 # Other constants
 _PAGE_LOAD_TIME = 5  # time to wait for pages to load (in seconds)
+_FORM_SUBMIT_SLEEP = 2  # time to wait after submitting a form (in seconds)
 _FORM_CONTAINER_SEARCH_LIMIT = 4  # number of parents of input fields to search
 
 def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, browser_params,
@@ -205,6 +208,7 @@ def _find_and_fill_form(webdriver, api, logger):
     """Finds and fills a form, and returns True if accomplished."""
     current_url = webdriver.current_url
     current_site_title = webdriver.title.encode('ascii', 'replace')
+    main_handle = webdriver.current_window_handle
     in_iframe = False
 
     # try to find newsletter form on landing page
@@ -232,16 +236,54 @@ def _find_and_fill_form(webdriver, api, logger):
     email = _get_email_from_api(api, current_url, current_site_title)
     _form_fill_and_submit(newsletter_form, email, webdriver, False)
     logger.info('submitted form on [%s] with email [%s]', current_url, email)
+    time.sleep(_FORM_SUBMIT_SLEEP)
+    _dismiss_alert(webdriver)
 
-    # fill any follow-up forms
+    # fill any follow-up forms...
     wait_until_loaded(webdriver, _PAGE_LOAD_TIME)  # wait if we got redirected
-    follow_up_form = _find_newsletter_form(webdriver)
-    if follow_up_form is not None:
-        _form_fill_and_submit(follow_up_form, email, webdriver, True)
+    follow_up_form = None
+
+    # first check other windows (ex. pop-ups)
+    windows = webdriver.window_handles
+    if len(windows) > 1:
+        form_found_in_popup = False
+        for window in windows:
+            if window != main_handle:
+                webdriver.switch_to_window(window)
+
+                # find newsletter form
+                if follow_up_form is None:
+                    follow_up_form = _find_newsletter_form(webdriver)
+                    if follow_up_form is not None:
+                        _form_fill_and_submit(follow_up_form, email, webdriver, True)
+                        time.sleep(_FORM_SUBMIT_SLEEP)
+                        _dismiss_alert(webdriver)
+
+                webdriver.close()
+        webdriver.switch_to_window(main_handle)
+        time.sleep(1)
+
+    # else check current page
+    if follow_up_form is None:
+        follow_up_form = _find_newsletter_form(webdriver)
+        if follow_up_form is not None:
+            _form_fill_and_submit(follow_up_form, email, webdriver, True)
+            time.sleep(_FORM_SUBMIT_SLEEP)
+            _dismiss_alert(webdriver)
 
 	# switch back
     if in_iframe:
         webdriver.switch_to_default_content()
+
+    # close other windows (ex. pop-ups)
+    windows = webdriver.window_handles
+    if len(windows) > 1:
+        for window in windows:
+            if window != main_handle:
+                webdriver.switch_to_window(window)
+                webdriver.close()
+        webdriver.switch_to_window(main_handle)
+        time.sleep(1)
 
     return True
 
@@ -277,10 +319,13 @@ def _find_newsletter_form(webdriver):
             continue
 
         # form matched, get some other ranking criteria:
-        # rank modal/pop-up/dialogs higher, since these are likely to be sign-up forms
+        # - rank modal/pop-up/dialogs higher, since these are likely to be sign-up forms
         z_index = _get_z_index(form, webdriver)
         has_modal_text = 'modal' in form_html or 'dialog' in form_html
-        newsletter_forms.append((form, (z_index, int(has_modal_text))))
+        # - rank login dialogs lower, in case better forms exist
+        #   (count occurrences of these keywords, since they might just be in a URL)
+        login_text_count = -sum([form_html.count(s) for s in ['login', 'log in', 'sign in']])
+        newsletter_forms.append((form, (z_index, int(has_modal_text), login_text_count)))
 
     # return highest ranked form
     if newsletter_forms:
@@ -375,6 +420,15 @@ def _get_z_index(element, webdriver):
             break
     return 0
 
+def _dismiss_alert(webdriver):
+    """Dismisses an alert, if present."""
+    try:
+        WebDriverWait(webdriver, 0.5).until(expected_conditions.alert_is_present())
+        alert = webdriver.switch_to_alert()
+        alert.dismiss()
+    except TimeoutException:
+        pass
+
 def _form_fill_and_submit(form, email, webdriver, clear):
     """Fills out a form and submits it, then waits for the response."""
     # try to fill all input fields in the form...
@@ -396,21 +450,19 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             # try to decipher this based on field attributes
             if _element_contains_text(input_field, _KEYWORDS_EMAIL):
                 _type_in_field(input_field, email, clear)
+            elif _element_contains_text(input_field, ['user', 'account']):
+                _type_in_field(input_field, fake_user, clear)
+            elif _element_contains_text(input_field, 'company'):
+                _type_in_field(input_field, 'Smith & Co.', clear)
+            elif _element_contains_text(input_field, 'title'):
+                _type_in_field(input_field, 'Mr.', clear)
             elif _element_contains_text(input_field, 'name'):
-                if _element_contains_text(input_field, ['user', 'account']):
-                    _type_in_field(input_field, fake_user, clear)
-                elif _element_contains_text(input_field, ['first', 'forename']):
+                if _element_contains_text(input_field, ['first', 'forename']):
                     _type_in_field(input_field, 'Bob', clear)
                 elif _element_contains_text(input_field, ['last', 'surname']):
                     _type_in_field(input_field, 'Smith', clear)
-                elif _element_contains_text(input_field, 'company'):
-                    _type_in_field(input_field, 'Smith & Co.', clear)
-                elif _element_contains_text(input_field, 'title'):
-                    _type_in_field(input_field, 'Mr.', clear)
                 else:
                     _type_in_field(input_field, 'Bob Smith', clear)
-            elif _element_contains_text(input_field, 'title'):
-                _type_in_field(input_field, 'Mr.', clear)
             elif _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
                 _type_in_field(input_field, fake_tel, clear)
             elif _element_contains_text(input_field, ['zip', 'postal']):
@@ -491,7 +543,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             if ('yes' in opt_text or
                 'ny' in opt_text or 'new york' in opt_text or
                 'united states' in opt_text or 'usa' in opt_text or
-                'mr' in opt_text or 'mister' in opt_text):
+                '1990' in opt_text):
                 selected_index = i
                 break
         if selected_index is None:
@@ -510,11 +562,11 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             text_field.send_keys(Keys.RETURN)  # press enter
         except:
             pass
-    if form.tag_name.lower() == 'form':
-        try:
+    try:
+        if form.tag_name.lower() == 'form':
             form.submit()  # submit() form
-        except:
-            pass
+    except:
+        pass
 
 def _element_contains_text(element, text):
     """Scans various element attributes for the given text."""
