@@ -36,12 +36,12 @@ _LINK_TEXT_RANK = [
 
     # news articles (sometimes sign-up links are on these pages...)
     (_TYPE_HREF, '/article', 3, _FLAG_NONE),
-    (_TYPE_HREF, 'news/',    3, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'news/',    3, _FLAG_IN_NEW_URL_ONLY),
     (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2, _FLAG_NONE),
-    (_TYPE_HREF, 'technology',    1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
-    (_TYPE_HREF, 'business',      1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
-    (_TYPE_HREF, 'politics',      1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
-    (_TYPE_HREF, 'entertainment', 1, _FLAG_NONE | _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'technology',    1, _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'business',      1, _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'politics',      1, _FLAG_IN_NEW_URL_ONLY),
+    (_TYPE_HREF, 'entertainment', 1, _FLAG_IN_NEW_URL_ONLY),
 
     # country selectors (for country-selection landing pages)
     (_TYPE_HREF, '/us/',  1, _FLAG_STAY_ON_PAGE | _FLAG_IN_NEW_URL_ONLY),
@@ -52,8 +52,13 @@ _LINK_RANK_SKIP = 6  # minimum rank to select immediately (skipping the rest of 
 _LINK_MATCH_TIMEOUT = 20  # maximum time to match links, in seconds
 _LINK_TEXT_BLACKLIST = ['unsubscribe', 'mobile', 'phone']
 
+# Keywords
+_KEYWORDS_EMAIL  = ['email', 'e-mail', 'subscribe', 'newsletter']
+_KEYWORDS_SUBMIT = ['submit', 'sign up', 'sign-up', 'signup', 'subscribe', 'register']
+
 # Other constants
 _PAGE_LOAD_TIME = 5  # time to wait for pages to load (in seconds)
+_FORM_CONTAINER_SEARCH_LIMIT = 4  # number of parents of input fields to search
 
 def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, browser_params,
                      manager_params, extension_socket, page_timeout=8):
@@ -228,36 +233,101 @@ def _find_newsletter_form(webdriver):
         if not form.is_displayed():
             continue
 
-        # find words 'email' or 'newsletter' in the form
+        # find email keywords in the form HTML (preliminary filtering)
         form_html = form.get_attribute('outerHTML').lower()
         match = False
-        if 'email' in form_html or 'newsletter' in form_html:
-            # check if an input field contains an email element
-            input_fields = form.find_elements_by_tag_name('input')
-            for input_field in input_fields:
-                type = input_field.get_attribute('type').lower()
-                if type == 'email':
-                    match = True
-                    break
-                elif type == 'text':
-                    if _element_contains_text(input_field, ['email', 'e-mail', 'subscribe', 'newsletter']):
-                        match = True
-                        break
+        for s in _KEYWORDS_EMAIL:
+            if s in form_html:
+                match = True
+                break
+        if not match:
+            continue
 
-        # if this form matched, get some other ranking criteria:
+        # check if an input field contains an email element
+        input_fields = form.find_elements_by_tag_name('input')
+        match = False
+        for input_field in input_fields:
+            if input_field.is_displayed() and _is_email_input(input_field):
+                match = True
+                break
+        if not match:
+            continue
+
+        # form matched, get some other ranking criteria:
         # rank modal/pop-up/dialogs higher, since these are likely to be sign-up forms
-        if match:
-            z_index = _get_z_index(form, webdriver)
-            has_modal_text = 'modal' in form_html or 'dialog' in form_html
-            newsletter_forms.append((form, (z_index, int(has_modal_text))))
-
-    # no matches?
-    if not newsletter_forms:
-        return None
+        z_index = _get_z_index(form, webdriver)
+        has_modal_text = 'modal' in form_html or 'dialog' in form_html
+        newsletter_forms.append((form, (z_index, int(has_modal_text))))
 
     # return highest ranked form
-    newsletter_forms.sort(key=lambda x: x[1], reverse=True)
-    return newsletter_forms[0][0]
+    if newsletter_forms:
+        newsletter_forms.sort(key=lambda x: x[1], reverse=True)
+        return newsletter_forms[0][0]
+
+    # try to find any container with email input fields and a submit button
+    input_fields = webdriver.find_elements_by_tag_name('input')
+    visited_containers = set()
+    for input_field in input_fields:
+        if not input_field.is_displayed() or not _is_email_input(input_field):
+            continue
+
+        # email input field found, check parents for container with a submit button
+        try:
+            e = input_field
+            for i in xrange(_FORM_CONTAINER_SEARCH_LIMIT):
+                e = e.find_element_by_xpath('..')  # get parent
+                if e is None or e.id in visited_containers:
+                    continue  # already visited
+
+                # is this a container type? (<div> or <span>)
+                tag_name = e.tag_name.lower()
+                if tag_name == 'div' or tag_name == 'span':
+                    # does this contain a submit button?
+                    if _has_submit_button(e):
+                        return e  # yes, we're done
+
+                visited_containers.add(e.id)
+        except:
+            pass
+
+    # still no matches?
+    return None
+
+def _is_email_input(input_field):
+    """Returns whether the given input field is an email input field."""
+    type = input_field.get_attribute('type').lower()
+    if type == 'email':
+        return True
+    elif type == 'text':
+        if _element_contains_text(input_field, _KEYWORDS_EMAIL):
+            return True
+    return False
+
+def _has_submit_button(container):
+    """Returns whether the given container has a submit button."""
+    # check <input> tags
+    input_fields = container.find_elements_by_tag_name('input')
+    for input_field in input_fields:
+        if not input_field.is_displayed():
+            continue
+
+        type = input_field.get_attribute('type').lower()
+        if type == 'submit' or type == 'button' or type == 'image':
+            if _element_contains_text(input_field, _KEYWORDS_SUBMIT):
+                return True
+
+    # check <button> tags
+    buttons = container.find_elements_by_tag_name('button')
+    for button in buttons:
+        if not button.is_displayed():
+            continue
+
+        type = button.get_attribute('type').lower()
+        if type is None or (type != 'reset' and type != 'menu'):
+            if _element_contains_text(button, _KEYWORDS_SUBMIT):
+                return True
+
+    return False
 
 def _get_z_index(element, webdriver):
     """Tries to find the actual z-index of an element, otherwise returns 0."""
@@ -301,7 +371,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             text_field = input_field
         elif type == 'text':
             # try to decipher this based on field attributes
-            if _element_contains_text(input_field, ['email', 'e-mail', 'subscribe', 'newsletter']):
+            if _element_contains_text(input_field, _KEYWORDS_EMAIL):
                 _type_in_field(input_field, email, clear)
             elif _element_contains_text(input_field, 'name'):
                 if _element_contains_text(input_field, ['user', 'account']):
@@ -355,7 +425,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         elif type == 'tel':
             _type_in_field(input_field, fake_tel, clear)
         elif type == 'submit' or type == 'button' or type == 'image':
-            if _element_contains_text(input_field, ['submit', 'sign up', 'sign-up', 'signup', 'subscribe', 'register']):
+            if _element_contains_text(input_field, _KEYWORDS_SUBMIT):
                 submit_button = input_field
         elif type == 'reset' or type == 'hidden' or type == 'search':
             # common irrelevant input types
@@ -377,7 +447,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
                 continue
 
             # pick first matching button
-            if _element_contains_text(button, ['submit', 'sign up', 'sign-up', 'signup', 'subscribe', 'register']):
+            if _element_contains_text(button, _KEYWORDS_SUBMIT):
                 submit_button = button
                 break
 
@@ -409,19 +479,23 @@ def _form_fill_and_submit(form, email, webdriver, clear):
     if submit_button is not None:
         try:
             submit_button.click()  # trigger javascript events if possible
+            return
         except:
-            form.submit()  # fall back (e.g. if obscured by modal)
-    elif text_field is not None:
+            pass
+    if text_field is not None:
         try:
             text_field.send_keys(Keys.RETURN)  # press enter
         except:
-            form.submit()  # fall back
-    else:
-        form.submit()
+            pass
+    if form.tag_name.lower() == 'form':
+        try:
+            form.submit()  # submit() form
+        except:
+            pass
 
 def _element_contains_text(element, text):
     """Scans various element attributes for the given text."""
-    attributes = ['name', 'class', 'id', 'placeholder', 'value', 'for']
+    attributes = ['name', 'class', 'id', 'placeholder', 'value', 'for', 'innerHTML']
     text_list = text if type(text) is list else [text]
     for s in text_list:
         for attr in attributes:
