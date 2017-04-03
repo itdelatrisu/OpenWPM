@@ -457,7 +457,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             elif _element_contains_text(input_field, 'title'):
                 _type_in_field(input_field, 'Mr.', clear)
             elif _element_contains_text(input_field, 'name'):
-                if _element_contains_text(input_field, ['first', 'forename']):
+                if _element_contains_text(input_field, ['first', 'forename', 'fname']):
                     _type_in_field(input_field, 'Bob', clear)
                 elif _element_contains_text(input_field, ['last', 'surname']):
                     _type_in_field(input_field, 'Smith', clear)
