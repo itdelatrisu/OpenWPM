@@ -87,6 +87,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
     for i in xrange(num_links):
         # get all links on the page
         links = webdriver.find_elements_by_tag_name('a')
+        random.shuffle(links)
 
         current_url = webdriver.current_url
         current_ps1 = domain_utils.get_ps_plus_1(current_url)
@@ -465,6 +466,12 @@ def _form_fill_and_submit(form, email, webdriver, clear):
                     _type_in_field(input_field, 'Bob Smith', clear)
             elif _element_contains_text(input_field, ['zip', 'postal']):
                 _type_in_field(input_field, '12345', clear)
+            elif _element_contains_text(input_field, 'city'):
+                _type_in_field(input_field, 'Schenectady', clear)
+            elif _element_contains_text(input_field, 'state'):
+                _type_in_field(input_field, 'New York', clear)
+            elif _element_contains_text(input_field, _KEYWORDS_EMAIL):
+                _type_in_field(input_field, email, clear)
             elif _element_contains_text(input_field, ['street', 'address']):
                 if _element_contains_text(input_field, ['2', 'number']):
                     _type_in_field(input_field, 'Apt. 101', clear)
@@ -472,12 +479,6 @@ def _form_fill_and_submit(form, email, webdriver, clear):
                     pass
                 else:
                     _type_in_field(input_field, '101 Main St.', clear)
-            elif _element_contains_text(input_field, 'city'):
-                _type_in_field(input_field, 'Schenectady', clear)
-            elif _element_contains_text(input_field, 'state'):
-                _type_in_field(input_field, 'New York', clear)
-            elif _element_contains_text(input_field, _KEYWORDS_EMAIL):
-                _type_in_field(input_field, email, clear)
             elif _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
                 _type_in_field(input_field, fake_tel, clear)
             elif _element_contains_text(input_field, 'search'):
