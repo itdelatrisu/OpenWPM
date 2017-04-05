@@ -325,7 +325,9 @@ def _find_newsletter_form(webdriver):
         # - rank login dialogs lower, in case better forms exist
         #   (count occurrences of these keywords, since they might just be in a URL)
         login_text_count = -sum([form_html.count(s) for s in ['login', 'log in', 'sign in']])
-        newsletter_forms.append((form, (z_index, int(has_modal_text), login_text_count)))
+        # - rank forms with more input elements higher
+        input_field_count = len([x for x in input_fields if x.is_displayed()])
+        newsletter_forms.append((form, (z_index, int(has_modal_text), login_text_count, input_field_count)))
 
     # return highest ranked form
     if newsletter_forms:
@@ -448,23 +450,19 @@ def _form_fill_and_submit(form, email, webdriver, clear):
             text_field = input_field
         elif type == 'text':
             # try to decipher this based on field attributes
-            if _element_contains_text(input_field, _KEYWORDS_EMAIL):
-                _type_in_field(input_field, email, clear)
-            elif _element_contains_text(input_field, ['user', 'account']):
-                _type_in_field(input_field, fake_user, clear)
-            elif _element_contains_text(input_field, 'company'):
+            if _element_contains_text(input_field, 'company'):
                 _type_in_field(input_field, 'Smith & Co.', clear)
             elif _element_contains_text(input_field, 'title'):
                 _type_in_field(input_field, 'Mr.', clear)
             elif _element_contains_text(input_field, 'name'):
                 if _element_contains_text(input_field, ['first', 'forename', 'fname']):
                     _type_in_field(input_field, 'Bob', clear)
-                elif _element_contains_text(input_field, ['last', 'surname']):
+                elif _element_contains_text(input_field, ['last', 'surname', 'lname']):
                     _type_in_field(input_field, 'Smith', clear)
+                elif _element_contains_text(input_field, ['user', 'account']):
+                    _type_in_field(input_field, fake_user, clear)
                 else:
                     _type_in_field(input_field, 'Bob Smith', clear)
-            elif _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
-                _type_in_field(input_field, fake_tel, clear)
             elif _element_contains_text(input_field, ['zip', 'postal']):
                 _type_in_field(input_field, '12345', clear)
             elif _element_contains_text(input_field, ['street', 'address']):
@@ -478,11 +476,21 @@ def _form_fill_and_submit(form, email, webdriver, clear):
                 _type_in_field(input_field, 'Schenectady', clear)
             elif _element_contains_text(input_field, 'state'):
                 _type_in_field(input_field, 'New York', clear)
+            elif _element_contains_text(input_field, _KEYWORDS_EMAIL):
+                _type_in_field(input_field, email, clear)
+            elif _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
+                _type_in_field(input_field, fake_tel, clear)
             elif _element_contains_text(input_field, 'search'):
                 pass
             else:
+                # skip if visibly marked "optional"
+                placeholder = input_field.get_attribute('placeholder')
+                if placeholder is not None and 'optional' in placeholder.lower():
+                    pass
+
                 # default: assume email
-                _type_in_field(input_field, email, clear)
+                else:
+                    _type_in_field(input_field, email, clear)
             text_field = input_field
         elif type == 'number':
             if _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
@@ -539,15 +547,15 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         select_options = select.options
         selected_index = None
         for i, opt in enumerate(select_options):
-            opt_text = opt.text.lower()
-            if ('yes' in opt_text or
-                'ny' in opt_text or 'new york' in opt_text or
-                'united states' in opt_text or 'usa' in opt_text or
-                '1990' in opt_text):
+            opt_text = opt.text.strip().lower()
+            if (opt_text == 'yes' or
+                opt_text == 'ny' or opt_text == 'new york' or
+                opt_text == 'united states' or opt_text == 'usa' or
+                opt_text == '1990'):
                 selected_index = i
                 break
         if selected_index is None:
-            selected_index = min(2, len(select_options))
+            selected_index = min(1, len(select_options) - 1)
         select.select_by_index(selected_index)
 
     # submit the form
@@ -570,7 +578,7 @@ def _form_fill_and_submit(form, email, webdriver, clear):
 
 def _element_contains_text(element, text):
     """Scans various element attributes for the given text."""
-    attributes = ['name', 'class', 'id', 'placeholder', 'value', 'for', 'innerHTML']
+    attributes = ['name', 'class', 'id', 'placeholder', 'value', 'for', 'title', 'innerHTML']
     text_list = text if type(text) is list else [text]
     for s in text_list:
         for attr in attributes:
