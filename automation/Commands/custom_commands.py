@@ -38,14 +38,10 @@ _LINK_TEXT_RANK = [
     (_TYPE_TEXT, 'create',     4, _FLAG_NONE),
     (_TYPE_TEXT, 'join',       4, _FLAG_NONE),
 
-    # news articles (sometimes sign-up links are on these pages...)
+    # articles (sometimes sign-up links are on these pages...)
     (_TYPE_HREF, '/article', 3, _FLAG_NONE),
     (_TYPE_HREF, 'news/',    3, _FLAG_IN_NEW_URL_ONLY),
     (_TYPE_HREF, '/' + str(datetime.datetime.now().year), 2, _FLAG_NONE),
-    (_TYPE_HREF, 'technology',    1, _FLAG_IN_NEW_URL_ONLY),
-    (_TYPE_HREF, 'business',      1, _FLAG_IN_NEW_URL_ONLY),
-    (_TYPE_HREF, 'politics',      1, _FLAG_IN_NEW_URL_ONLY),
-    (_TYPE_HREF, 'entertainment', 1, _FLAG_IN_NEW_URL_ONLY),
 
     # country selectors (for country-selection landing pages)
     (_TYPE_HREF, '/us/',  1, _FLAG_STAY_ON_PAGE | _FLAG_IN_NEW_URL_ONLY),
