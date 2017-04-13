@@ -13,7 +13,7 @@ import datetime
 from ..MPLogger import loggingclient
 from ..utilities import domain_utils
 from utils.webdriver_extensions import wait_until_loaded
-from browser_commands import get_website, bot_mitigation
+from browser_commands import get_website, bot_mitigation, save_screenshot, dump_page_source
 
 # Link text ranking
 _TYPE_TEXT = 'text'
@@ -61,8 +61,8 @@ _PAGE_LOAD_TIME = 5  # time to wait for pages to load (in seconds)
 _FORM_SUBMIT_SLEEP = 2  # time to wait after submitting a form (in seconds)
 _FORM_CONTAINER_SEARCH_LIMIT = 4  # number of parents of input fields to search
 
-def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, browser_params,
-                     manager_params, extension_socket, page_timeout=8):
+def fill_forms(url, api, num_links, page_timeout, debug, visit_id,
+               webdriver, proxy_queue, browser_params, manager_params, extension_socket):
     """Finds a newsletter form on the page. If not found, visits <num_links>
     internal links and scans those pages for a form. Submits the form if found.
     """
@@ -74,7 +74,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
     logger = loggingclient(*manager_params['logger_address'])
 
     # try to find newsletter form on landing page
-    if _find_and_fill_form(webdriver, api, logger):
+    if _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
         return
 
     # otherwise, scan more pages
@@ -155,7 +155,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
                 bot_mitigation(webdriver)
 
             # find newsletter form
-            if _find_and_fill_form(webdriver, api, logger):
+            if _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
                 return
 
             # should we stay on this page?
@@ -176,7 +176,7 @@ def find_newsletters(url, api, num_links, visit_id, webdriver, proxy_queue, brow
                         wait_until_loaded(webdriver, _PAGE_LOAD_TIME)
 
                         # find newsletter form
-                        if _find_and_fill_form(webdriver, api, logger):
+                        if _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
                             form_found_in_popup = True
 
                         webdriver.close()
@@ -201,12 +201,21 @@ def _is_internal_link(href, url, ps1=None):
         ps1 = domain_utils.get_ps_plus_1(url)
     return domain_utils.get_ps_plus_1(urljoin(url, href)) == ps1
 
-def _find_and_fill_form(webdriver, api, logger):
+def _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
     """Finds and fills a form, and returns True if accomplished."""
     current_url = webdriver.current_url
     current_site_title = webdriver.title.encode('ascii', 'replace')
     main_handle = webdriver.current_window_handle
     in_iframe = False
+
+    # debug: save before/after screenshots and page source
+    debug_file_prefix = str(visit_id) + '_'
+    debug_form_pre_initial = debug_file_prefix + 'form_initial_presubmit'
+    debug_form_post_initial = debug_file_prefix + 'form_initial_result'
+    debug_form_pre_followup = debug_file_prefix + 'form_followup_presubmit'
+    debug_form_post_followup = debug_file_prefix + 'form_followup_result'
+    debug_page_source_initial = debug_file_prefix + 'src_initial'
+    debug_page_source_followup = debug_file_prefix + 'src_followup'
 
     # try to find newsletter form on landing page
     newsletter_form = _find_newsletter_form(webdriver)
@@ -220,6 +229,8 @@ def _find_and_fill_form(webdriver, api, logger):
             # is there a form?
             newsletter_form = _find_newsletter_form(webdriver)
             if newsletter_form is not None:
+                if debug:
+                    dump_page_source(debug_page_source_initial, webdriver, browser_params, manager_params)
                 in_iframe = True
                 break  # form found, stay on the iframe
 
@@ -229,12 +240,15 @@ def _find_and_fill_form(webdriver, api, logger):
         # still no form?
         if newsletter_form is None:
             return False
+    elif debug:
+        dump_page_source(debug_page_source_initial, webdriver, browser_params, manager_params)
 
     email = _get_email_from_api(api, current_url, current_site_title)
-    _form_fill_and_submit(newsletter_form, email, webdriver, False)
+    _form_fill_and_submit(newsletter_form, email, webdriver, False, browser_params, manager_params, debug_form_pre_initial if debug else None)
     logger.info('submitted form on [%s] with email [%s]', current_url, email)
     time.sleep(_FORM_SUBMIT_SLEEP)
     _dismiss_alert(webdriver)
+    if debug: save_screenshot(debug_form_post_initial, webdriver, browser_params, manager_params)
 
     # fill any follow-up forms...
     wait_until_loaded(webdriver, _PAGE_LOAD_TIME)  # wait if we got redirected
@@ -252,9 +266,12 @@ def _find_and_fill_form(webdriver, api, logger):
                 if follow_up_form is None:
                     follow_up_form = _find_newsletter_form(webdriver)
                     if follow_up_form is not None:
-                        _form_fill_and_submit(follow_up_form, email, webdriver, True)
+                        if debug:
+                            dump_page_source(debug_page_source_followup, webdriver, browser_params, manager_params)
+                        _form_fill_and_submit(follow_up_form, email, webdriver, True, browser_params, manager_params, debug_form_pre_followup if debug else None)
                         time.sleep(_FORM_SUBMIT_SLEEP)
                         _dismiss_alert(webdriver)
+                        if debug: save_screenshot(debug_form_post_followup, webdriver, browser_params, manager_params)
 
                 webdriver.close()
         webdriver.switch_to_window(main_handle)
@@ -264,9 +281,12 @@ def _find_and_fill_form(webdriver, api, logger):
     if follow_up_form is None:
         follow_up_form = _find_newsletter_form(webdriver)
         if follow_up_form is not None:
-            _form_fill_and_submit(follow_up_form, email, webdriver, True)
+            if debug:
+                dump_page_source(debug_page_source_followup, webdriver, browser_params, manager_params)
+            _form_fill_and_submit(follow_up_form, email, webdriver, True, browser_params, manager_params, debug_form_pre_followup if debug else None)
             time.sleep(_FORM_SUBMIT_SLEEP)
             _dismiss_alert(webdriver)
+            if debug: save_screenshot(debug_form_post_followup, webdriver, browser_params, manager_params)
 
 	# switch back
     if in_iframe:
@@ -428,7 +448,7 @@ def _dismiss_alert(webdriver):
     except TimeoutException:
         pass
 
-def _form_fill_and_submit(form, email, webdriver, clear):
+def _form_fill_and_submit(form, email, webdriver, clear, browser_params, manager_params, screenshot_filename):
     """Fills out a form and submits it, then waits for the response."""
     # try to fill all input fields in the form...
     input_fields = form.find_elements_by_tag_name('input')
@@ -554,6 +574,9 @@ def _form_fill_and_submit(form, email, webdriver, clear):
         if selected_index is None:
             selected_index = min(1, len(select_options) - 1)
         select.select_by_index(selected_index)
+
+    # debug: save screenshot
+    if screenshot_filename: save_screenshot(screenshot_filename, webdriver, browser_params, manager_params)
 
     # submit the form
     if submit_button is not None:

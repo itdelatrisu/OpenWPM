@@ -115,9 +115,9 @@ class CommandSequence:
         command = ('RUN_CUSTOM_FUNCTION', function_handle, func_args)
         self.commands_with_timeout.append((command, timeout))
 
-    def find_newsletters(self, api, num_links=4, timeout=60):
+    def fill_forms(self, api, num_links=3, timeout=120, page_timeout=8, debug=False):
         """ Find newsletters on the page and sign up for them. """
         self.total_timeout += timeout
-        command = ('FIND_NEWSLETTERS', self.url, api, num_links,)
+        command = ('FILL_FORMS', self.url, api, num_links, page_timeout, debug,)
         self.commands_with_timeout.append((command, timeout))
         self.contains_get_or_browse = True

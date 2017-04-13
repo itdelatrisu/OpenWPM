@@ -15,7 +15,7 @@ manager_params, browser_params = TaskManager.load_default_params(NUM_BROWSERS)
 
 # Update browser configuration (use this for per-browser settings)
 for i in xrange(NUM_BROWSERS):
-    browser_params[i]['headless'] = False
+    browser_params[i]['headless'] = True
     browser_params[i]['bot_mitigation'] = True
     browser_params[i]['disable_flash'] = True
     browser_params[i]['disable_images'] = True
@@ -32,7 +32,7 @@ manager = TaskManager.TaskManager(manager_params, browser_params)
 # Visits the sites with all browsers simultaneously
 def crawl_site(site, manager, api):
     command_sequence = CommandSequence.CommandSequence(site)
-    command_sequence.find_newsletters(api=api, num_links=3, timeout=120)
+    command_sequence.fill_forms(api=api, num_links=3, timeout=120, page_timeout=8, debug=False)
     manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
 
 # Read site list
