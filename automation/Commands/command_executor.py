@@ -61,7 +61,7 @@ def execute_command(command, webdriver, proxy_queue, browser_settings, browser_p
         command[1](*command[2], **arg_dict)
 
     if command[0] == 'FILL_FORMS':
-        custom_commands.fill_forms(url=command[1], api=command[2], num_links=command[3],
+        custom_commands.fill_forms(url=command[1], email_producer=command[2], num_links=command[3],
                                    page_timeout=command[4], debug=command[5], visit_id=command[6],
                                    webdriver=webdriver, proxy_queue=proxy_queue, browser_params=browser_params,
                                    manager_params=manager_params, extension_socket=extension_socket)

@@ -55,26 +55,47 @@ _LINK_TEXT_BLACKLIST = ['unsubscribe', 'mobile', 'phone']
 # Keywords
 _KEYWORDS_EMAIL  = ['email', 'e-mail', 'subscribe', 'newsletter']
 _KEYWORDS_SUBMIT = ['submit', 'sign up', 'sign-up', 'signup', 'sign me up', 'subscribe', 'register', 'join']
+_KEYWORDS_SELECT = ['yes', 'ny', 'new york', 'united states', 'usa', '1990']
 
 # Other constants
 _PAGE_LOAD_TIME = 5  # time to wait for pages to load (in seconds)
 _FORM_SUBMIT_SLEEP = 2  # time to wait after submitting a form (in seconds)
 _FORM_CONTAINER_SEARCH_LIMIT = 4  # number of parents of input fields to search
 
-def fill_forms(url, api, num_links, page_timeout, debug, visit_id,
+# User information to supply to forms
+def _get_user_info(email):
+    """Returns a dictionary of user information."""
+    return {
+        'email': email,
+        'first_name': 'Bob',
+        'last_name': 'Smith',
+        'full_name': 'Bob Smith',
+        'user': 'bobsmith' + str(random.randrange(0,1000)),
+        'password': 'p4S$w0rd123',
+        'tel': '212' + '555' + '01' + str(random.randrange(0,10)) + str(random.randrange(0,10)),
+        'company': 'Smith & Co.',
+        'title': 'Mr.',
+        'zip': '12345',
+        'street1': '101 Main St.',
+        'street2': 'Apt. 101',
+        'city': 'Schenectady',
+        'state': 'New York',
+    }
+
+def fill_forms(url, email_producer, num_links, page_timeout, debug, visit_id,
                webdriver, proxy_queue, browser_params, manager_params, extension_socket):
     """Finds a newsletter form on the page. If not found, visits <num_links>
     internal links and scans those pages for a form. Submits the form if found.
     """
-    # get the site
+    # load the site
     webdriver.set_page_load_timeout(page_timeout)
     get_website(url, 0, visit_id, webdriver, proxy_queue, browser_params, extension_socket)
 
-    # connect to logger
+    # connect to the logger
     logger = loggingclient(*manager_params['logger_address'])
 
-    # try to find newsletter form on landing page
-    if _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
+    # try to find a newsletter form on the landing page
+    if _find_and_fill_form(webdriver, email_producer, visit_id, debug, browser_params, manager_params, logger):
         return
 
     # otherwise, scan more pages
@@ -155,7 +176,7 @@ def fill_forms(url, api, num_links, page_timeout, debug, visit_id,
                 bot_mitigation(webdriver)
 
             # find newsletter form
-            if _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
+            if _find_and_fill_form(webdriver, email_producer, visit_id, debug, browser_params, manager_params, logger):
                 return
 
             # should we stay on this page?
@@ -176,7 +197,7 @@ def fill_forms(url, api, num_links, page_timeout, debug, visit_id,
                         wait_until_loaded(webdriver, _PAGE_LOAD_TIME)
 
                         # find newsletter form
-                        if _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
+                        if _find_and_fill_form(webdriver, email_producer, visit_id, debug, browser_params, manager_params, logger):
                             form_found_in_popup = True
 
                         webdriver.close()
@@ -188,20 +209,13 @@ def fill_forms(url, api, num_links, page_timeout, debug, visit_id,
         except:
             pass
 
-def _get_email_from_api(api, url, site_title):
-    """Registers an email address with the mail API, and returns the email."""
-    data = urlencode({'site': site_title, 'url': url})
-    req = Request(api, data)
-    response = urlopen(req)
-    return response.read()
-
 def _is_internal_link(href, url, ps1=None):
     """Returns whether the given link is an internal link."""
     if ps1 is None:
         ps1 = domain_utils.get_ps_plus_1(url)
     return domain_utils.get_ps_plus_1(urljoin(url, href)) == ps1
 
-def _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager_params, logger):
+def _find_and_fill_form(webdriver, email_producer, visit_id, debug, browser_params, manager_params, logger):
     """Finds and fills a form, and returns True if accomplished."""
     current_url = webdriver.current_url
     current_site_title = webdriver.title.encode('ascii', 'replace')
@@ -243,8 +257,9 @@ def _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager
     elif debug:
         dump_page_source(debug_page_source_initial, webdriver, browser_params, manager_params)
 
-    email = _get_email_from_api(api, current_url, current_site_title)
-    _form_fill_and_submit(newsletter_form, email, webdriver, False, browser_params, manager_params, debug_form_pre_initial if debug else None)
+    email = email_producer(current_url, current_site_title)
+    user_info = _get_user_info(email)
+    _form_fill_and_submit(newsletter_form, user_info, webdriver, False, browser_params, manager_params, debug_form_pre_initial if debug else None)
     logger.info('submitted form on [%s] with email [%s]', current_url, email)
     time.sleep(_FORM_SUBMIT_SLEEP)
     _dismiss_alert(webdriver)
@@ -268,7 +283,7 @@ def _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager
                     if follow_up_form is not None:
                         if debug:
                             dump_page_source(debug_page_source_followup, webdriver, browser_params, manager_params)
-                        _form_fill_and_submit(follow_up_form, email, webdriver, True, browser_params, manager_params, debug_form_pre_followup if debug else None)
+                        _form_fill_and_submit(follow_up_form, user_info, webdriver, True, browser_params, manager_params, debug_form_pre_followup if debug else None)
                         time.sleep(_FORM_SUBMIT_SLEEP)
                         _dismiss_alert(webdriver)
                         if debug: save_screenshot(debug_form_post_followup, webdriver, browser_params, manager_params)
@@ -283,7 +298,7 @@ def _find_and_fill_form(webdriver, api, visit_id, debug, browser_params, manager
         if follow_up_form is not None:
             if debug:
                 dump_page_source(debug_page_source_followup, webdriver, browser_params, manager_params)
-            _form_fill_and_submit(follow_up_form, email, webdriver, True, browser_params, manager_params, debug_form_pre_followup if debug else None)
+            _form_fill_and_submit(follow_up_form, user_info, webdriver, True, browser_params, manager_params, debug_form_pre_followup if debug else None)
             time.sleep(_FORM_SUBMIT_SLEEP)
             _dismiss_alert(webdriver)
             if debug: save_screenshot(debug_form_post_followup, webdriver, browser_params, manager_params)
@@ -448,14 +463,12 @@ def _dismiss_alert(webdriver):
     except TimeoutException:
         pass
 
-def _form_fill_and_submit(form, email, webdriver, clear, browser_params, manager_params, screenshot_filename):
+def _form_fill_and_submit(form, user_info, webdriver, clear, browser_params, manager_params, screenshot_filename):
     """Fills out a form and submits it, then waits for the response."""
     # try to fill all input fields in the form...
     input_fields = form.find_elements_by_tag_name('input')
     submit_button = None
     text_field = None
-    fake_user = 'bobsmith' + str(random.randrange(0,1000))
-    fake_tel = '212' + '555' + '01' + str(random.randrange(0,10)) + str(random.randrange(0,10))
     for input_field in input_fields:
         if not input_field.is_displayed():
             continue
@@ -463,40 +476,40 @@ def _form_fill_and_submit(form, email, webdriver, clear, browser_params, manager
         type = input_field.get_attribute('type').lower()
         if type == 'email':
             # using html5 "email" type, this is probably an email field
-            _type_in_field(input_field, email, clear)
+            _type_in_field(input_field, user_info['email'], clear)
             text_field = input_field
         elif type == 'text':
             # try to decipher this based on field attributes
             if _element_contains_text(input_field, 'company'):
-                _type_in_field(input_field, 'Smith & Co.', clear)
+                _type_in_field(input_field, user_info['company'], clear)
             elif _element_contains_text(input_field, 'title'):
-                _type_in_field(input_field, 'Mr.', clear)
+                _type_in_field(input_field, user_info['title'], clear)
             elif _element_contains_text(input_field, 'name'):
                 if _element_contains_text(input_field, ['first', 'forename', 'fname']):
-                    _type_in_field(input_field, 'Bob', clear)
+                    _type_in_field(input_field, user_info['first_name'], clear)
                 elif _element_contains_text(input_field, ['last', 'surname', 'lname']):
-                    _type_in_field(input_field, 'Smith', clear)
+                    _type_in_field(input_field, user_info['last_name'], clear)
                 elif _element_contains_text(input_field, ['user', 'account']):
-                    _type_in_field(input_field, fake_user, clear)
+                    _type_in_field(input_field, user_info['user'], clear)
                 else:
-                    _type_in_field(input_field, 'Bob Smith', clear)
+                    _type_in_field(input_field, user_info['full_name'], clear)
             elif _element_contains_text(input_field, ['zip', 'postal']):
-                _type_in_field(input_field, '12345', clear)
+                _type_in_field(input_field, user_info['zip'], clear)
             elif _element_contains_text(input_field, 'city'):
-                _type_in_field(input_field, 'Schenectady', clear)
+                _type_in_field(input_field, user_info['city'], clear)
             elif _element_contains_text(input_field, 'state'):
-                _type_in_field(input_field, 'New York', clear)
+                _type_in_field(input_field, user_info['state'], clear)
             elif _element_contains_text(input_field, _KEYWORDS_EMAIL):
-                _type_in_field(input_field, email, clear)
+                _type_in_field(input_field, user_info['email'], clear)
             elif _element_contains_text(input_field, ['street', 'address']):
                 if _element_contains_text(input_field, ['2', 'number']):
-                    _type_in_field(input_field, 'Apt. 101', clear)
+                    _type_in_field(input_field, user_info['street2'], clear)
                 elif _element_contains_text(input_field, '3'):
                     pass
                 else:
-                    _type_in_field(input_field, '101 Main St.', clear)
+                    _type_in_field(input_field, user_info['street1'], clear)
             elif _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
-                _type_in_field(input_field, fake_tel, clear)
+                _type_in_field(input_field, user_info['tel'], clear)
             elif _element_contains_text(input_field, 'search'):
                 pass
             else:
@@ -507,23 +520,23 @@ def _form_fill_and_submit(form, email, webdriver, clear, browser_params, manager
 
                 # default: assume email
                 else:
-                    _type_in_field(input_field, email, clear)
+                    _type_in_field(input_field, user_info['email'], clear)
             text_field = input_field
         elif type == 'number':
             if _element_contains_text(input_field, ['phone', 'tel', 'mobile']):
-                _type_in_field(input_field, fake_tel, clear)
+                _type_in_field(input_field, user_info['tel'], clear)
             elif _element_contains_text(input_field, ['zip', 'postal']):
-                _type_in_field(input_field, '12345', clear)
+                _type_in_field(input_field, user_info['zip'], clear)
             else:
-                _type_in_field(input_field, '12345', clear)
+                _type_in_field(input_field, user_info['zip'], clear)
         elif type == 'checkbox' or type == 'radio':
             # check anything/everything
             if not input_field.is_selected():
                 input_field.click()
         elif type == 'password':
-            _type_in_field(input_field, 'p4S$w0rd123', clear)
+            _type_in_field(input_field, user_info['password'], clear)
         elif type == 'tel':
-            _type_in_field(input_field, fake_tel, clear)
+            _type_in_field(input_field, user_info['tel'], clear)
         elif type == 'submit' or type == 'button' or type == 'image':
             if _element_contains_text(input_field, _KEYWORDS_SUBMIT):
                 submit_button = input_field
@@ -532,7 +545,7 @@ def _form_fill_and_submit(form, email, webdriver, clear, browser_params, manager
             pass
         else:
             # default: assume email
-            _type_in_field(input_field, email, clear)
+            _type_in_field(input_field, user_info['email'], clear)
 
     # find 'button' tags (if necessary)
     if submit_button is None:
@@ -565,10 +578,7 @@ def _form_fill_and_submit(form, email, webdriver, clear, browser_params, manager
         selected_index = None
         for i, opt in enumerate(select_options):
             opt_text = opt.text.strip().lower()
-            if (opt_text == 'yes' or
-                opt_text == 'ny' or opt_text == 'new york' or
-                opt_text == 'united states' or opt_text == 'usa' or
-                opt_text == '1990'):
+            if opt_text in _KEYWORDS_SELECT:
                 selected_index = i
                 break
         if selected_index is None:

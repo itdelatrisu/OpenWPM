@@ -66,3 +66,7 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+
+# Default output directories
+output_crawl/
+output_visit/

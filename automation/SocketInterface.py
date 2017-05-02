@@ -34,8 +34,10 @@ class serversocket:
         while True:
             try:
                 (client, address) = self.sock.accept()
-            except:  # [Errno 9] Bad file descriptor
-                break
+            except:
+                # TODO: handle [Errno 9] Bad file descriptor
+                # currently the program just hangs here...
+                raise
             thread = threading.Thread(target=self._handle_conn, args=(client, address))
             thread.daemon = True
             thread.start()

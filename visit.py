@@ -7,35 +7,14 @@ import StringIO, gzip
 # Constants
 NUM_BROWSERS = 1
 output_dir = 'output_visit/'
-
-# Loads the manager preference and the default browser dictionaries
-manager_params, browser_params = TaskManager.load_default_params(NUM_BROWSERS)
-
-# Update browser configuration (use this for per-browser settings)
-for i in xrange(NUM_BROWSERS):
-    browser_params[i]['headless'] = True
-    browser_params[i]['bot_mitigation'] = True
-    browser_params[i]['disable_flash'] = True
-    browser_params[i]['disable_images'] = False
-    browser_params[i]['http_instrument'] = True
-
-# Update TaskManager configuration (use this for crawl-wide settings)
-manager_params['data_directory'] = output_dir
-manager_params['log_directory'] = output_dir
-manager_params['database_name'] = 'visit.sqlite'
-
-# Visits the sites with all browsers simultaneously
-def crawl_site(site, manager):
-    command_sequence = CommandSequence.CommandSequence(site)
-    command_sequence.get(sleep=1, timeout=120)
-    manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
+db_name = 'visit.sqlite'
 
 # Mail API functions
-api = 'http://lorveskel.me:8080/'
-api_visit = api + 'visit'
-api_results = api + 'results'
+api_visit = 'http://lorveskel.me:8080/visit'
+api_results = 'http://lorveskel.me:8080/results'
 POLL_INTERVAL = 10  # in seconds
 def api_get_sites():
+    # Fetches a set of sites from the mail API
     try:
         req = Request(api_visit)
         f = urlopen(req)
@@ -45,6 +24,7 @@ def api_get_sites():
     except:
         return {}
 def api_send_results(id, requests):
+    # Sends results for a group ID back to the mail API
     try:
         data = json.dumps({'id': id, 'requests': requests})
         data = gzips(data)
@@ -62,6 +42,28 @@ def gzips(s):
     with gzip.GzipFile(fileobj=out, mode='w') as f:
         f.write(s)
     return out.getvalue()
+
+# Loads the manager preference and the default browser dictionaries
+manager_params, browser_params = TaskManager.load_default_params(NUM_BROWSERS)
+
+# Update browser configuration (use this for per-browser settings)
+for i in xrange(NUM_BROWSERS):
+    browser_params[i]['headless'] = True
+    browser_params[i]['bot_mitigation'] = True
+    browser_params[i]['disable_flash'] = True
+    browser_params[i]['disable_images'] = False
+    browser_params[i]['http_instrument'] = True
+
+# Update TaskManager configuration (use this for crawl-wide settings)
+manager_params['data_directory'] = output_dir
+manager_params['log_directory'] = output_dir
+manager_params['database_name'] = db_name
+
+# Visits the sites
+def crawl_site(site, manager):
+    command_sequence = CommandSequence.CommandSequence(site)
+    command_sequence.get(sleep=1, timeout=120)
+    manager.execute_command_sequence(command_sequence, index='**') # ** = synchronized browsers
 
 # Database functions
 db = os.path.expanduser(os.path.join(manager_params['data_directory'], manager_params['database_name']))
